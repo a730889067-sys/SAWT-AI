@@ -13,11 +13,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -121,7 +124,7 @@ private fun SawtApp() {
       Spacer(Modifier.height(12.dp)); Text(message,color=Muted,fontSize=11.sp,textAlign=TextAlign.Center,modifier=Modifier.fillMaxWidth())
      }
      1 -> {
-      Text("مكتبة الأصوات",fontSize=25.sp,fontWeight=FontWeight.Bold); Spacer(Modifier.height(6.dp)); Text("أصوات العربية الفصحى المثبتة على جهازك.",color=Muted,fontSize=13.sp); Spacer(Modifier.height(18.dp))
+      Text("مكتبة الأصوات",fontSize=25.sp,fontWeight=FontWeight.Bold); Spacer(Modifier.height(6.dp)); Text("الأصوات العربية التي يوفرها محرك جهازك؛ قد تختلف جودتها ولهجتها.",color=Muted,fontSize=13.sp); Spacer(Modifier.height(18.dp))
       if(voices.isEmpty()) {
        InfoCard("لا توجد أصوات عربية","ثبّت حزمة صوت عربية من إعدادات محرك تحويل النص إلى كلام في هاتفك.",Icons.Default.CloudDownload)
        Button(onClick={SystemVoiceCatalog.openTtsSettings(context)},modifier=Modifier.fillMaxWidth()) { Text("إدارة وتنزيل أصوات الجهاز") }
@@ -149,6 +152,7 @@ private fun SawtApp() {
     Spacer(Modifier.height(28.dp))
    }
   }
+ }
  }
 }
 
