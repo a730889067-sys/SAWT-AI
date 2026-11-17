@@ -107,7 +107,7 @@ private fun SawtApp() {
       Spacer(Modifier.width(11.dp))
       Column { Text("SAWT AI",fontSize=21.sp,fontWeight=FontWeight.ExtraBold,letterSpacing=1.2.sp); Text("استوديو الصوت العربي",color=Muted,fontSize=11.sp) }
      }
-     Surface(color=Color(0xFF183A3B),shape=CircleShape) { Text("الفصحى",Modifier.padding(horizontal=12.dp,vertical=8.dp),color=Cyan,fontSize=11.sp,fontWeight=FontWeight.Bold) }
+     Surface(color=Color(0xFF183A3B),shape=CircleShape) { Text("العربية",Modifier.padding(horizontal=12.dp,vertical=8.dp),color=Cyan,fontSize=11.sp,fontWeight=FontWeight.Bold) }
     }
     Spacer(Modifier.height(27.dp))
     when(tab) {
@@ -132,7 +132,7 @@ private fun SawtApp() {
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) { Text("الصوت المختار",fontWeight=FontWeight.SemiBold); TextButton(onClick={tab=1}) { Text("كل الأصوات") } }
         if(selectedCloudVoice!=null) Row(verticalAlignment=Alignment.CenterVertically) { Box(Modifier.size(44.dp).clip(CircleShape).background(Panel2),contentAlignment=Alignment.Center) { Icon(Icons.Default.Cloud,null,tint=Cyan) }; Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(selectedCloudVoice!!.label,fontWeight=FontWeight.Bold); Text("صوت فصيح من المكتبة السحابية",color=Muted,fontSize=11.sp) }; Icon(Icons.Default.CheckCircle,null,tint=Cyan) } else if(selectedVoice!=null) Row(verticalAlignment=Alignment.CenterVertically) {
          Box(Modifier.size(44.dp).clip(CircleShape).background(Panel2),contentAlignment=Alignment.Center) { Icon(Icons.Default.RecordVoiceOver,null,tint=Cyan) }
-         Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(selectedVoice!!.label,fontWeight=FontWeight.Bold); Text("صوت عربي مثبت على جهازك",color=Muted,fontSize=11.sp) }; Icon(Icons.Default.CheckCircle,null,tint=Cyan)
+         Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(selectedVoice!!.label,fontWeight=FontWeight.Bold); Text("صوت الجهاز · قد لا يكون فصحى",color=Muted,fontSize=11.sp) }; Icon(Icons.Default.CheckCircle,null,tint=Cyan)
         } else Text("لا توجد أصوات عربية مثبتة.",color=Muted,fontSize=12.sp)
        }
       }
@@ -220,12 +220,12 @@ private fun SawtApp() {
          }
         }
        }
-       OutlinedButton(onClick={SystemVoiceCatalog.openTtsSettings(context)},modifier=Modifier.fillMaxWidth()) { Icon(Icons.Default.Download,null); Text("تنزيل أصوات إضافية") }
+       OutlinedButton(onClick={SystemVoiceCatalog.openTtsSettings(context)},modifier=Modifier.fillMaxWidth()) { Icon(Icons.Default.Download,null); Text("إدارة أصوات الجهاز") }
       }
      }
      else -> {
       Text("الإعدادات",fontSize=25.sp,fontWeight=FontWeight.Bold); Spacer(Modifier.height(18.dp))
-      InfoCard("مصمم للعربية الفصحى","لن نضيف لهجات عامية إلى مكتبة SAWT AI.",Icons.Default.Translate)
+      InfoCard("الأولوية للفصحى","المكتبة السحابية تستخدم ar-XA فقط. أصوات الهاتف المحلية قد تختلف ولا نضمن أنها فصحى.",Icons.Default.Translate)
       InfoCard("الخصوصية أولًا","القراءة المحلية تبقى على جهازك. عند اختيار صوت الفصحى السحابي يُرسل النص إلى خادم SAWT AI لتوليد ملف صوتي.",Icons.Default.Security)
       InfoCard("التشغيل في الخلفية","يمكن متابعة القراءة بعد مغادرة الشاشة عبر خدمة تشغيل صوت وإشعار تحكم.",Icons.Default.Headphones)
       InfoCard("مكتبة الفصحى السحابية",if(apiUrl.isBlank()) "لم يتم ربط عنوان الخادم بعد؛ الأصوات السحابية لن تعمل قبل نشر الخادم وضبط عنوانه." else "الخادم: $apiUrl",Icons.Default.Cloud)
