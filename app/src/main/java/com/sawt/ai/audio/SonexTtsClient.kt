@@ -30,9 +30,10 @@ data class SonexVoiceOption(
 class SonexTtsClient(private val apiKey: String) {
     private fun open(path: String): HttpURLConnection {
         val connection = URL("https://api.sonexlabs.com$path").openConnection() as HttpURLConnection
-        connection.connectTimeout = 20000
-        connection.readTimeout = 90000
+        connection.connectTimeout = 10000
+        connection.readTimeout = 60000
         connection.setRequestProperty("Authorization", "Bearer $apiKey")
+        connection.setRequestProperty("Connection", "keep-alive")
         return connection
     }
 
