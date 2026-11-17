@@ -91,7 +91,7 @@ private fun SawtStudio() {
     var localProgress by remember { mutableStateOf("") }
     var localError by remember { mutableStateOf<String?>(null) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
-    val localBridge = remember(context) {
+    val localBridge: NabraLocalBridge = remember(context) {
         NabraLocalBridge(context) { event ->
             when (event) {
                 NabraBridgeEvent.PageReady -> {
