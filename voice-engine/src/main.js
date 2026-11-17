@@ -68,14 +68,14 @@ async function load() {
   loadPromise = (async () => {
     const model = await NabraTTS.load({
       repo: "oddadmix/Nabra-7M-Distill-ONNX",
-      revision: "main",
+      revision: "bbac0f1e6b001bfae89871be366a4b000180deb2",
       dtype: "fp16",
       device: "wasm",
       worker: true,
       cache: true,
       numThreads: 1,
       wasmPaths: new URL("./wasm/", window.location.href).href,
-      normalize: true,
+      normalize: false,
       diacritize: diacritizeArabic,
       onProgress: progress => notifyProgress(progress.file, progress.loaded, progress.total)
     });
@@ -115,7 +115,7 @@ function sendPcm(bytes) {
   if (!bridge) throw new Error("تعذر الاتصال بتطبيق SAWT AI.");
   const chunkSize = 48 * 1024;
   for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    bridge.appendAudioChunk(base64(bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length))));
+    if (!bridge.appendAudioChunk(base64(bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length))))) {\n      throw new Error("تعذرت كتابة جزء من ملف الصوت.");\n    }
   }
 }
 
@@ -126,11 +126,11 @@ async function generate(text, speed = 1) {
   }
   try {
     const engine = await load();
-    native()?.beginAudio(24000);
+    if (!native()?.beginAudio(24000)) throw new Error("تعذر إنشاء ملف الصوت المحلي.");
     for await (const chunk of engine.stream(text, { speed: Math.max(0.8, Math.min(1.2, speed)) })) {
       sendPcm(floatToPcm16(chunk.audio));
     }
-    native()?.finishAudio();
+    if (!native()?.finishAudio()) throw new Error("تعذر إكمال ملف الصوت المحلي.");
   } catch (error) {
     native()?.cancelAudio();
     notifyError(error);
