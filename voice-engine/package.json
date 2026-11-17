@@ -1,0 +1,16 @@
+{
+  "name": "sawt-ai-offline-voice-engine",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "node ./copy-wasm.mjs && vite build"
+  },
+  "dependencies": {
+    "nabra-tts": "0.1.0",
+    "onnxruntime-web": "1.30.0"
+  },
+  "devDependencies": {
+    "vite": "8.3.8"
+  }
+}
