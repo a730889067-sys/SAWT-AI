@@ -4,7 +4,7 @@
  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
  <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
  <queries><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent></queries>
- <application android:allowBackup="true" android:label="SAWT AI" android:icon="@mipmap/ic_launcher" android:supportsRtl="true" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:usesCleartextTraffic="false">
+ <application android:allowBackup="false" android:label="SAWT AI" android:icon="@mipmap/ic_launcher" android:supportsRtl="true" android:theme="@android:style/Theme.Material.Light.NoActionBar" android:usesCleartextTraffic="false">
   <activity android:name=".MainActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
   <service android:name=".audio.SpeechPlaybackService" android:exported="false" android:foregroundServiceType="mediaPlayback"/>
  </application>
