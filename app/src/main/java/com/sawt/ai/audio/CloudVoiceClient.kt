@@ -18,52 +18,111 @@ data class CloudVoiceOption(
 }
 
 class CloudVoiceClient(private val baseUrl: String) {
-    private fun endpoint(path: String) = URL(baseUrl.trimEnd('/') + path)
+    private fun endpoint(path: String): URL =
+        URL(baseUrl.trimEnd('/') + path)
 
     fun fetchVoices(): List<CloudVoiceOption> {
         val connection = endpoint("/v1/voices").openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "GET"
-            connection.connectTimeout = 15000
-            connection.readTimeout = 20000
-            if (connection.responseCode !in 200..299) error("تعذر تحميل مكتبة الأصوات")
-            val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+            connection.connectTimeout = 15_000
+            connection.readTimeout = 25_000
+            connection.setRequestProperty("Accept", "application/json")
+
+            val responseCode = connection.responseCode
+            if (responseCode !in 200..299) {
+                error("تعذر تحميل مكتبة الأصوات (رمز $responseCode).")
+            }
+
+            val json = JSONObject(connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() })
             val array = json.getJSONArray("voices")
             return (0 until array.length()).mapNotNull { index ->
                 val item = array.getJSONObject(index)
                 val id = item.optString("id")
-                if (!id.startsWith("ar-XA-")) null
-                else CloudVoiceOption(id, item.optString("gender"), item.optString("quality"))
+                val gender = item.optString("gender")
+                if (!id.matches(Regex("^ar-XA-[A-Za-z0-9-]+$")) ||
+                    gender !in setOf("MALE", "FEMALE")) {
+                    null
+                } else {
+                    CloudVoiceOption(id, gender, item.optString("quality"))
+                }
             }
         } finally {
             connection.disconnect()
         }
     }
 
-    fun synthesizeToFile(text: String, voiceId: String, rate: Float, pitch: Float, output: File) {
-        require(text.isNotBlank() && text.length <= 5000) { "النص يجب ألا يتجاوز 5000 حرف." }
-        require(voiceId.startsWith("ar-XA-")) { "هذه المكتبة مخصصة للعربية الفصحى فقط." }
+    fun synthesizeToFile(
+        text: String,
+        voiceId: String,
+        rate: Float,
+        pitch: Float,
+        output: File
+    ) {
+        require(text.isNotBlank()) { "اكتب نصًا أولًا." }
+        require(text.toByteArray(Charsets.UTF_8).size <= MAX_REQUEST_BYTES) {
+            "النص أطول من الحد المسموح به في طلب واحد. قلّل النص ثم حاول مجددًا."
+        }
+        require(voiceId.matches(Regex("^ar-XA-[A-Za-z0-9-]+$"))) {
+            "هذا الصوت ليس من مكتبة العربية الفصحى."
+        }
+
         val connection = endpoint("/v1/synthesize").openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "POST"
-            connection.connectTimeout = 20000
-            connection.readTimeout = 90000
+            connection.connectTimeout = 20_000
+            connection.readTimeout = 120_000
             connection.doOutput = true
             connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            connection.setRequestProperty("Accept", "audio/mpeg")
+
             val body = JSONObject()
                 .put("text", text)
                 .put("voiceId", voiceId)
-                .put("speakingRate", rate.toDouble())
-                .put("pitch", ((pitch - 1f) * 12f).toDouble())
+                .put("speakingRate", rate.toDouble().coerceIn(0.7, 1.3))
+                .put("pitch", ((pitch - 1f) * 12f).toDouble().coerceIn(-5.0, 5.0))
                 .toString()
+
             connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-            if (connection.responseCode !in 200..299) {
-                val detail = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
-                error(if (detail.contains("ONLY_MODERN")) "الخادم يقبل أصوات العربية الفصحى فقط." else "فشل إنشاء الصوت. تحقق من إعداد الخادم.")
+
+            val responseCode = connection.responseCode
+            if (responseCode !in 200..299) {
+                val detail = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                when {
+                    detail.contains("ONLY_MODERN_STANDARD_ARABIC_VOICES_ALLOWED") ->
+                        error("الخادم يقبل أصوات العربية الفصحى فقط.")
+                    detail.contains("INVALID_TEXT") ->
+                        error("النص أطول من الحد المسموح به.")
+                    responseCode == 429 ->
+                        error("وصلت إلى حد الطلبات المؤقت. انتظر قليلًا ثم حاول.")
+                    else -> error("فشل إنشاء الصوت (رمز $responseCode). تحقق من الخادم والإنترنت.")
+                }
             }
-            connection.inputStream.use { input -> output.outputStream().use { input.copyTo(it) } }
+
+            val contentType = connection.contentType.orEmpty()
+            require(contentType.startsWith("audio/", ignoreCase = true)) {
+                "لم يرجع الخادم ملفًا صوتيًا صالحًا."
+            }
+
+            output.parentFile?.mkdirs()
+            output.delete()
+            connection.inputStream.use { input ->
+                output.outputStream().use { destination -> input.copyTo(destination) }
+            }
+            require(output.exists() && output.length() >= MIN_AUDIO_BYTES) {
+                output.delete()
+                "ملف الصوت المستلم فارغ أو غير مكتمل."
+            }
+        } catch (error: Exception) {
+            output.delete()
+            throw error
         } finally {
             connection.disconnect()
         }
+    }
+
+    companion object {
+        private const val MAX_REQUEST_BYTES = 5_000
+        private const val MIN_AUDIO_BYTES = 256L
     }
 }
