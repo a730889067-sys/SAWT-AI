@@ -7,7 +7,17 @@ android {
  namespace = "com.sawt.ai"
  compileSdk = 35
  defaultConfig { applicationId = "com.sawt.ai"; minSdk = 26; targetSdk = 35; versionCode = 1; versionName = "1.0.0" }
- buildFeatures { compose = true }
+ buildFeatures { compose = true; buildConfig = true }
+ buildTypes {
+  getByName("debug") {
+   val apiUrl = providers.gradleProperty("SAWT_API_BASE_URL").orElse("").get()
+   buildConfigField("String", "SAWT_API_BASE_URL", "\"$apiUrl\"")
+  }
+  getByName("release") {
+   val apiUrl = providers.gradleProperty("SAWT_API_BASE_URL").orElse("").get()
+   buildConfigField("String", "SAWT_API_BASE_URL", "\"$apiUrl\"")
+  }
+ }
  packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
 }
 dependencies {
