@@ -69,7 +69,7 @@ async function load() {
     const model = await NabraTTS.load({
       repo: "oddadmix/Nabra-7M-Distill-ONNX",
       revision: "main",
-      dtype: "fp32",
+      dtype: "fp16",
       device: "wasm",
       worker: true,
       cache: true,
