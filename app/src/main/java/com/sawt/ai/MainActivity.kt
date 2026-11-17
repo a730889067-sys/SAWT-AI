@@ -66,6 +66,7 @@ private fun SawtApp() {
   if (voices.isEmpty()) message = "لا يوجد صوت عربي مثبت حاليًا. يمكنك تثبيت صوت من إعدادات الجهاز."
  }
 
+ CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
  MaterialTheme(colorScheme = darkColorScheme(background=Ink, surface=Panel, primary=Cyan, onPrimary=Ink, onBackground=Color.White, onSurface=Color.White, secondary=Color(0xFF9B8CFF))) {
   Scaffold(containerColor=Ink, bottomBar={
    NavigationBar(containerColor=Panel, contentColor=Cyan) {
