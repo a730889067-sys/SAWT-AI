@@ -4,6 +4,9 @@ import android.os.Bundle
 import android.os.Build
 import android.Manifest
 import android.content.pm.PackageManager
+import android.content.ContentValues
+import android.provider.MediaStore
+import android.os.Environment
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -68,6 +71,7 @@ private fun SawtApp() {
  var cloudVoices by remember { mutableStateOf<List<CloudVoiceOption>>(emptyList()) }
  var selectedCloudVoice by remember { mutableStateOf<CloudVoiceOption?>(null) }
  var cloudLoading by remember { mutableStateOf(false) }
+ var lastGeneratedFile by remember { mutableStateOf<File?>(null) }
  val scope = rememberCoroutineScope()
  val apiUrl = com.sawt.ai.BuildConfig.SAWT_API_BASE_URL
  val cloudClient = remember(apiUrl) { if (apiUrl.isBlank()) null else CloudVoiceClient(apiUrl) }
@@ -158,6 +162,7 @@ private fun SawtApp() {
              val folder = File(context.cacheDir, "sawt-audio").apply { mkdirs() }
              File(folder, "speech-${System.currentTimeMillis()}.mp3").also { cloudClient.synthesizeToFile(text, voice.id, rate, pitch, it) }
             }
+            lastGeneratedFile = audioFile
             SpeechPlaybackService.playFile(context, audioFile.absolutePath)
             message="بدأ تشغيل الصوت الفصيح في الخلفية."
            } catch (error: Exception) { message=error.message ?: "تعذر إنشاء الصوت. تحقق من اتصال الخادم." }
@@ -173,6 +178,16 @@ private fun SawtApp() {
       },modifier=Modifier.fillMaxWidth().height(56.dp),shape=RoundedCornerShape(17.dp),colors=ButtonDefaults.buttonColors(containerColor=Cyan,contentColor=Ink)) { Icon(Icons.Default.PlayArrow,null); Spacer(Modifier.width(8.dp)); Text("استمع الآن",fontWeight=FontWeight.Bold,fontSize=16.sp) }
       Spacer(Modifier.height(8.dp))
       OutlinedButton(onClick={SpeechPlaybackService.stop(context);message="تم إيقاف التشغيل."},modifier=Modifier.fillMaxWidth(),shape=RoundedCornerShape(15.dp)) { Icon(Icons.Default.Stop,null); Spacer(Modifier.width(7.dp)); Text("إيقاف الصوت") }
+      if (lastGeneratedFile != null) {
+       Spacer(Modifier.height(8.dp))
+       OutlinedButton(onClick={
+        val audio = lastGeneratedFile
+        if (audio != null) scope.launch {
+         try { val saved = withContext(Dispatchers.IO) { saveAudioToDownloads(context, audio) }; message = "تم حفظ ملف MP3: $saved" }
+         catch (_: Exception) { message = "تعذر حفظ الملف. حاول مرة أخرى." }
+        }
+       },modifier=Modifier.fillMaxWidth(),shape=RoundedCornerShape(15.dp)) { Icon(Icons.Default.Download,null); Spacer(Modifier.width(7.dp)); Text("حفظ الصوت كملف MP3") }
+      }
       Spacer(Modifier.height(12.dp)); Text(message,color=Muted,fontSize=11.sp,textAlign=TextAlign.Center,modifier=Modifier.fillMaxWidth())
      }
      1 -> {
@@ -222,6 +237,29 @@ private fun SawtApp() {
   }
  }
  }
+}
+
+@Composable
+private fun saveAudioToDownloads(context: android.content.Context, source: File): String {
+ val filename = "SAWT-${System.currentTimeMillis()}.mp3"
+ if (Build.VERSION.SDK_INT >= 29) {
+  val values = ContentValues().apply {
+   put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+   put(MediaStore.MediaColumns.MIME_TYPE, "audio/mpeg")
+   put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/SAWT AI")
+   put(MediaStore.MediaColumns.IS_PENDING, 1)
+  }
+  val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: error("تعذر إنشاء ملف التنزيل")
+  try {
+   context.contentResolver.openOutputStream(uri)?.use { output -> source.inputStream().use { it.copyTo(output) } } ?: error("تعذر كتابة ملف الصوت")
+   values.clear(); values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+   context.contentResolver.update(uri, values, null, null)
+  } catch (error: Exception) { context.contentResolver.delete(uri, null, null); throw error }
+ } else {
+  val folder = File(context.getExternalFilesDir(Environment.DIRECTORY_MUSIC), "SAWT AI").apply { mkdirs() }
+  source.copyTo(File(folder, filename), overwrite = true)
+ }
+ return filename
 }
 
 @Composable
