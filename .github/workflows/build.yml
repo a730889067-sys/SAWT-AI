@@ -51,6 +51,8 @@ jobs:
           npm install --no-audit --no-fund
           mkdir -p public node_modules/nabra-tts
           cp ../THIRD_PARTY_NOTICES.md public/THIRD_PARTY_NOTICES.md
+          cat ../nabra-tts-src/THIRD_PARTY_NOTICES.md >> public/THIRD_PARTY_NOTICES.md
+          cp ../nabra-tts-src/LICENSE public/NABRA-LICENSE-APACHE-2.0.txt
           cp -R ../nabra-tts-src/dist node_modules/nabra-tts/
           cp ../nabra-tts-src/package.json ../nabra-tts-src/LICENSE ../nabra-tts-src/THIRD_PARTY_NOTICES.md node_modules/nabra-tts/
           npm run build
