@@ -6,7 +6,7 @@ plugins {
 android {
  namespace = "com.sawt.ai"
  compileSdk = 35
- defaultConfig { applicationId = "com.sawt.ai"; minSdk = 26; targetSdk = 35; versionCode = 6; versionName = "1.4.1" }
+ defaultConfig { applicationId = "com.sawt.ai"; minSdk = 26; targetSdk = 35; versionCode = 7; versionName = "1.4.2" }
  compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
  kotlinOptions { jvmTarget = "17" }
  buildFeatures { compose = true; buildConfig = true }
