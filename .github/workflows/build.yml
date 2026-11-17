@@ -38,7 +38,8 @@ jobs:
 
       - name: Build upstream Nabra package from its source
         run: |
-          git clone --depth 1 https://github.com/Oddadmix/nabra-tts.git nabra-tts-src
+          git clone https://github.com/Oddadmix/nabra-tts.git nabra-tts-src
+          git -C nabra-tts-src checkout 16b5281ce61993df3526740990cf845a3f3036f4
           npm --prefix nabra-tts-src install --no-audit --no-fund
           npm --prefix nabra-tts-src run typecheck
           npm --prefix nabra-tts-src test
@@ -48,7 +49,8 @@ jobs:
         working-directory: voice-engine
         run: |
           npm install --no-audit --no-fund
-          mkdir -p node_modules/nabra-tts
+          mkdir -p public node_modules/nabra-tts
+          cp ../THIRD_PARTY_NOTICES.md public/THIRD_PARTY_NOTICES.md
           cp -R ../nabra-tts-src/dist node_modules/nabra-tts/
           cp ../nabra-tts-src/package.json ../nabra-tts-src/LICENSE ../nabra-tts-src/THIRD_PARTY_NOTICES.md node_modules/nabra-tts/
           npm run build
