@@ -33,6 +33,12 @@ import androidx.compose.ui.unit.sp
 import com.sawt.ai.audio.SpeechPlaybackService
 import com.sawt.ai.audio.SystemVoiceCatalog
 import com.sawt.ai.audio.VoiceOption
+import com.sawt.ai.audio.CloudVoiceClient
+import com.sawt.ai.audio.CloudVoiceOption
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 private val Ink = Color(0xFF080D18)
 private val Panel = Color(0xFF111B2C)
@@ -59,11 +65,25 @@ private fun SawtApp() {
  var pitch by remember { mutableFloatStateOf(1f) }
  var tab by remember { mutableIntStateOf(0) }
  var message by remember { mutableStateOf("اكتب نصك واختر الصوت الذي يناسبك") }
+ var cloudVoices by remember { mutableStateOf<List<CloudVoiceOption>>(emptyList()) }
+ var selectedCloudVoice by remember { mutableStateOf<CloudVoiceOption?>(null) }
+ var cloudLoading by remember { mutableStateOf(false) }
+ val scope = rememberCoroutineScope()
+ val apiUrl = com.sawt.ai.BuildConfig.SAWT_API_BASE_URL
+ val cloudClient = remember(apiUrl) { if (apiUrl.isBlank()) null else CloudVoiceClient(apiUrl) }
 
  LaunchedEffect(Unit) {
   voices = SystemVoiceCatalog(context).arabicVoices()
   selectedVoice = voices.firstOrNull()
   if (voices.isEmpty()) message = "لا يوجد صوت عربي مثبت حاليًا. يمكنك تثبيت صوت من إعدادات الجهاز."
+ }
+ LaunchedEffect(cloudClient) {
+  if (cloudClient != null) {
+   cloudLoading = true
+   try { cloudVoices = withContext(Dispatchers.IO) { cloudClient.fetchVoices() } }
+   catch (_: Exception) { message = "تعذر الاتصال بمكتبة الأصوات السحابية." }
+   finally { cloudLoading = false }
+  }
  }
 
  CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
@@ -106,7 +126,7 @@ private fun SawtApp() {
       Surface(color=Panel,shape=RoundedCornerShape(20.dp),modifier=Modifier.fillMaxWidth()) {
        Column(Modifier.padding(16.dp)) {
         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) { Text("الصوت المختار",fontWeight=FontWeight.SemiBold); TextButton(onClick={tab=1}) { Text("كل الأصوات") } }
-        if(selectedVoice!=null) Row(verticalAlignment=Alignment.CenterVertically) {
+        if(selectedCloudVoice!=null) Row(verticalAlignment=Alignment.CenterVertically) { Box(Modifier.size(44.dp).clip(CircleShape).background(Panel2),contentAlignment=Alignment.Center) { Icon(Icons.Default.Cloud,null,tint=Cyan) }; Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(selectedCloudVoice!!.label,fontWeight=FontWeight.Bold); Text("صوت فصيح من المكتبة السحابية",color=Muted,fontSize=11.sp) }; Icon(Icons.Default.CheckCircle,null,tint=Cyan) } else if(selectedVoice!=null) Row(verticalAlignment=Alignment.CenterVertically) {
          Box(Modifier.size(44.dp).clip(CircleShape).background(Panel2),contentAlignment=Alignment.Center) { Icon(Icons.Default.RecordVoiceOver,null,tint=Cyan) }
          Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(selectedVoice!!.label,fontWeight=FontWeight.Bold); Text("صوت عربي مثبت على جهازك",color=Muted,fontSize=11.sp) }; Icon(Icons.Default.CheckCircle,null,tint=Cyan)
         } else Text("لا توجد أصوات عربية مثبتة.",color=Muted,fontSize=12.sp)
@@ -124,20 +144,60 @@ private fun SawtApp() {
       }
       Spacer(Modifier.height(17.dp))
       Button(onClick={
-       when { text.isBlank()->message="اكتب نصًا أولًا."; selectedVoice==null->message="ثبّت صوتًا عربيًا من إعدادات الجهاز أولًا."; else->{ if(Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS); SpeechPlaybackService.start(context,text,selectedVoice!!.name,rate,pitch); message="بدأ التشغيل؛ يمكنك متابعة الاستماع في الخلفية." } }
+       when {
+        text.isBlank() -> message="اكتب نصًا أولًا."
+        selectedCloudVoice != null && cloudClient != null -> {
+         if (text.length > 5000) message="الحد الأقصى للنص السحابي 5000 حرف."
+         else {
+          if(Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+          message="جارٍ إنشاء الصوت الفصيح…"
+          val voice = selectedCloudVoice!!
+          scope.launch {
+           try {
+            val audioFile = withContext(Dispatchers.IO) {
+             val folder = File(context.cacheDir, "sawt-audio").apply { mkdirs() }
+             File(folder, "speech-${System.currentTimeMillis()}.mp3").also { cloudClient.synthesizeToFile(text, voice.id, rate, pitch, it) }
+            }
+            SpeechPlaybackService.playFile(context, audioFile.absolutePath)
+            message="بدأ تشغيل الصوت الفصيح في الخلفية."
+           } catch (error: Exception) { message=error.message ?: "تعذر إنشاء الصوت. تحقق من اتصال الخادم." }
+          }
+         }
+        }
+        selectedVoice != null -> {
+         if(Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+         SpeechPlaybackService.start(context,text,selectedVoice!!.name,rate,pitch); message="بدأ التشغيل؛ يمكنك متابعة الاستماع في الخلفية."
+        }
+        else -> message="اختر صوتًا من مكتبة الأصوات أولًا."
+       }
       },modifier=Modifier.fillMaxWidth().height(56.dp),shape=RoundedCornerShape(17.dp),colors=ButtonDefaults.buttonColors(containerColor=Cyan,contentColor=Ink)) { Icon(Icons.Default.PlayArrow,null); Spacer(Modifier.width(8.dp)); Text("استمع الآن",fontWeight=FontWeight.Bold,fontSize=16.sp) }
       Spacer(Modifier.height(8.dp))
       OutlinedButton(onClick={SpeechPlaybackService.stop(context);message="تم إيقاف التشغيل."},modifier=Modifier.fillMaxWidth(),shape=RoundedCornerShape(15.dp)) { Icon(Icons.Default.Stop,null); Spacer(Modifier.width(7.dp)); Text("إيقاف الصوت") }
       Spacer(Modifier.height(12.dp)); Text(message,color=Muted,fontSize=11.sp,textAlign=TextAlign.Center,modifier=Modifier.fillMaxWidth())
      }
      1 -> {
-      Text("مكتبة الأصوات",fontSize=25.sp,fontWeight=FontWeight.Bold); Spacer(Modifier.height(6.dp)); Text("الأصوات العربية التي يوفرها محرك جهازك؛ قد تختلف جودتها ولهجتها.",color=Muted,fontSize=13.sp); Spacer(Modifier.height(18.dp))
+      Text("مكتبة الأصوات",fontSize=25.sp,fontWeight=FontWeight.Bold); Spacer(Modifier.height(6.dp)); Text("اختر صوتًا فصيحًا سحابيًا أو صوتًا عربيًا متاحًا على جهازك.",color=Muted,fontSize=13.sp); Spacer(Modifier.height(18.dp))
+      Text("أصوات الفصحى السحابية",fontWeight=FontWeight.Bold,fontSize=16.sp)
+      Spacer(Modifier.height(8.dp))
+      when {
+       cloudClient == null -> InfoCard("مكتبة الفصحى غير مفعّلة بعد","بعد نشر خادم SAWT AI على Google Cloud، أضف رابط الخادم إلى SAWT_API_BASE_URL في إعدادات البناء لتظهر الأصوات الرجالية والنسائية.",Icons.Default.CloudOff)
+       cloudLoading -> InfoCard("جارٍ تحميل الأصوات","نتصل بمكتبة الأصوات العربية الفصحى…",Icons.Default.CloudDownload)
+       cloudVoices.isEmpty() -> InfoCard("لا توجد أصوات سحابية متاحة","تحقق من تشغيل الخادم وتفعيل خدمة Google Cloud Text-to-Speech.",Icons.Default.Info)
+       else -> cloudVoices.forEach { voice ->
+        Surface(color=Panel,shape=RoundedCornerShape(17.dp),modifier=Modifier.fillMaxWidth().padding(bottom=9.dp),onClick={selectedCloudVoice=voice;selectedVoice=null;tab=0}) {
+         Row(Modifier.padding(15.dp),verticalAlignment=Alignment.CenterVertically) { Icon(Icons.Default.Cloud,null,tint=Cyan,modifier=Modifier.size(25.dp)); Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(voice.label,fontWeight=FontWeight.Bold); Text(voice.quality.ifBlank { "Google Cloud · العربية الفصحى" },color=Muted,fontSize=11.sp) }; if(selectedCloudVoice?.id==voice.id) Icon(Icons.Default.CheckCircle,null,tint=Cyan) }
+        }
+       }
+      }
+      Spacer(Modifier.height(18.dp))
+      Text("أصوات الجهاز",fontWeight=FontWeight.Bold,fontSize=16.sp)
+      Spacer(Modifier.height(8.dp))
       if(voices.isEmpty()) {
        InfoCard("لا توجد أصوات عربية","ثبّت حزمة صوت عربية من إعدادات محرك تحويل النص إلى كلام في هاتفك.",Icons.Default.CloudDownload)
        Button(onClick={SystemVoiceCatalog.openTtsSettings(context)},modifier=Modifier.fillMaxWidth()) { Text("إدارة وتنزيل أصوات الجهاز") }
       } else {
        voices.forEach { voice ->
-        Surface(color=Panel,shape=RoundedCornerShape(17.dp),modifier=Modifier.fillMaxWidth().padding(bottom=10.dp),onClick={selectedVoice=voice;tab=0}) {
+        Surface(color=Panel,shape=RoundedCornerShape(17.dp),modifier=Modifier.fillMaxWidth().padding(bottom=10.dp),onClick={selectedVoice=voice;selectedCloudVoice=null;tab=0}) {
          Row(Modifier.padding(15.dp),verticalAlignment=Alignment.CenterVertically) {
           Icon(Icons.Default.RecordVoiceOver,null,tint=Cyan,modifier=Modifier.size(27.dp)); Spacer(Modifier.width(12.dp))
           Column(Modifier.weight(1f)) { Text(voice.label,fontWeight=FontWeight.Bold); Text(voice.qualityLabel,color=Muted,fontSize=11.sp) }
@@ -151,9 +211,10 @@ private fun SawtApp() {
      else -> {
       Text("الإعدادات",fontSize=25.sp,fontWeight=FontWeight.Bold); Spacer(Modifier.height(18.dp))
       InfoCard("مصمم للعربية الفصحى","لن نضيف لهجات عامية إلى مكتبة SAWT AI.",Icons.Default.Translate)
-      InfoCard("الخصوصية أولًا","في هذه النسخة تتم القراءة عبر محرك الصوت المثبت على جهازك؛ لا نرسل النص إلى خادم.",Icons.Default.Security)
+      InfoCard("الخصوصية أولًا","القراءة المحلية تبقى على جهازك. عند اختيار صوت الفصحى السحابي يُرسل النص إلى خادم SAWT AI لتوليد ملف صوتي.",Icons.Default.Security)
       InfoCard("التشغيل في الخلفية","يمكن متابعة القراءة بعد مغادرة الشاشة عبر خدمة تشغيل صوت وإشعار تحكم.",Icons.Default.Headphones)
-      InfoCard("إصدار التطبيق","SAWT AI 1.0.0 · النسخة التأسيسية",Icons.Default.Info)
+      InfoCard("مكتبة الفصحى السحابية",if(apiUrl.isBlank()) "لم يتم ربط عنوان الخادم بعد؛ الأصوات السحابية لن تعمل قبل نشر الخادم وضبط عنوانه." else "الخادم: $apiUrl",Icons.Default.Cloud)
+      InfoCard("إصدار التطبيق","SAWT AI 1.1.0 · تطوير مكتبة الأصوات",Icons.Default.Info)
      }
     }
     Spacer(Modifier.height(28.dp))
