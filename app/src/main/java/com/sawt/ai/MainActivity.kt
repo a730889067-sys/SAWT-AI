@@ -146,7 +146,7 @@ private fun SawtStudio() {
                             )
                         }
                         Surface(color = Color(0xFF211C13), shape = CircleShape) {
-                            Text("الفصحى", color = Gold, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp))
+                            Text("صوت عربي", color = Gold, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp))
                         }
                     }
 
@@ -313,7 +313,7 @@ private fun SawtStudio() {
                                 "٢. اختر الصوت الرجالي أو النسائي عندما يظهر أنه متاح.\n\n" +
                                 "٣. اضغط «إنشاء الصوت والاستماع» لبدء التحويل.\n\n" +
                                 "٤. بعد اكتمال الصوت، اضغط «حفظ ملف MP3» لحفظه في التنزيلات.\n\n" +
-                                "تنبيه: يجب أن تكون مكتبة الصوت مفعّلة. الأصوات المحلية تعمل دون إنترنت بعد تنزيل حزمها، أما الصوت السحابي فيحتاج اتصالًا بالإنترنت.",
+                                "تنبيه: يجب أن تكون مكتبة الصوت مفعّلة. عند إضافة حزم محلية معتمدة ستعمل دون إنترنت بعد تنزيلها، أما التوليد السحابي فيحتاج اتصالًا بالإنترنت.",
                             color = TextMain,
                             lineHeight = 23.sp
                         )
