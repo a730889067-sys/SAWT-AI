@@ -4,6 +4,8 @@ import android.os.Bundle
 import android.os.Build
 import android.Manifest
 import android.content.pm.PackageManager
+import android.content.Intent
+import android.net.Uri
 import android.content.ContentValues
 import android.provider.MediaStore
 import android.os.Environment
@@ -31,13 +33,14 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sawt.ai.audio.SpeechPlaybackService
 import com.sawt.ai.audio.SystemVoiceCatalog
 import com.sawt.ai.audio.VoiceOption
-import com.sawt.ai.audio.CloudVoiceClient
-import com.sawt.ai.audio.CloudVoiceOption
+import com.sawt.ai.audio.SonexTtsClient
+import com.sawt.ai.audio.SonexVoiceOption
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -68,25 +71,32 @@ private fun SawtApp() {
  var pitch by remember { mutableFloatStateOf(1f) }
  var tab by remember { mutableIntStateOf(0) }
  var message by remember { mutableStateOf("اكتب نصك واختر الصوت الذي يناسبك") }
- var cloudVoices by remember { mutableStateOf<List<CloudVoiceOption>>(emptyList()) }
- var selectedCloudVoice by remember { mutableStateOf<CloudVoiceOption?>(null) }
+ var cloudVoices by remember { mutableStateOf<List<SonexVoiceOption>>(emptyList()) }
+ var selectedCloudVoice by remember { mutableStateOf<SonexVoiceOption?>(null) }
  var cloudLoading by remember { mutableStateOf(false) }
  var lastGeneratedFile by remember { mutableStateOf<File?>(null) }
  val scope = rememberCoroutineScope()
- val apiUrl = com.sawt.ai.BuildConfig.SAWT_API_BASE_URL
- val cloudClient = remember(apiUrl) { if (apiUrl.isBlank()) null else CloudVoiceClient(apiUrl) }
+ val settings = remember { context.getSharedPreferences("sawt_ai_settings", android.content.Context.MODE_PRIVATE) }
+ var apiKey by remember { mutableStateOf(settings.getString("sonex_api_key", "").orEmpty()) }
+ var savedApiKey by remember { mutableStateOf(apiKey) }
+ val sonexClient = remember(savedApiKey) { savedApiKey.takeIf { it.isNotBlank() }?.let { SonexTtsClient(it) } }
 
  LaunchedEffect(Unit) {
   voices = SystemVoiceCatalog(context).arabicVoices()
   selectedVoice = voices.firstOrNull()
   if (voices.isEmpty()) message = "لا يوجد صوت عربي مثبت حاليًا. يمكنك تثبيت صوت من إعدادات الجهاز."
  }
- LaunchedEffect(cloudClient) {
-  if (cloudClient != null) {
+ LaunchedEffect(sonexClient) {
+  cloudVoices = emptyList()
+  selectedCloudVoice = null
+  if (sonexClient != null) {
    cloudLoading = true
-   try { cloudVoices = withContext(Dispatchers.IO) { cloudClient.fetchVoices() } }
-   catch (_: Exception) { message = "تعذر الاتصال بمكتبة الأصوات السحابية." }
-   finally { cloudLoading = false }
+   try {
+    cloudVoices = withContext(Dispatchers.IO) { sonexClient.fetchArabicVoices() }
+    if (cloudVoices.isEmpty()) message = "لم تظهر أصوات عربية في الحساب. تحقق من مكتبة Sonex."
+   } catch (error: Exception) {
+    message = error.message ?: "تعذر الاتصال بخدمة الصوت."
+   } finally { cloudLoading = false }
   }
  }
 
@@ -150,7 +160,7 @@ private fun SawtApp() {
       Button(onClick={
        when {
         text.isBlank() -> message="اكتب نصًا أولًا."
-        selectedCloudVoice != null && cloudClient != null -> {
+        selectedCloudVoice != null && sonexClient != null -> {
          if (text.length > 5000) message="الحد الأقصى للنص السحابي 5000 حرف."
          else {
           if(Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -160,7 +170,7 @@ private fun SawtApp() {
            try {
             val audioFile = withContext(Dispatchers.IO) {
              val folder = File(context.cacheDir, "sawt-audio").apply { mkdirs() }
-             File(folder, "speech-${System.currentTimeMillis()}.mp3").also { cloudClient.synthesizeToFile(text, voice.id, rate, pitch, it) }
+             File(folder, "speech-${System.currentTimeMillis()}.mp3").also { sonexClient.synthesizeToFile(text, voice.id, rate, it) }
             }
             lastGeneratedFile = audioFile
             SpeechPlaybackService.playFile(context, audioFile.absolutePath)
@@ -195,12 +205,12 @@ private fun SawtApp() {
       Text("أصوات الفصحى السحابية",fontWeight=FontWeight.Bold,fontSize=16.sp)
       Spacer(Modifier.height(8.dp))
       when {
-       cloudClient == null -> InfoCard("مكتبة الفصحى غير مفعّلة بعد","بعد نشر خادم SAWT AI على Google Cloud، أضف رابط الخادم إلى SAWT_API_BASE_URL في إعدادات البناء لتظهر الأصوات الرجالية والنسائية.",Icons.Default.CloudOff)
+       sonexClient == null -> InfoCard("اربط مكتبة الأصوات المجانية","أضف مفتاح Sonex المجاني من تبويب الإعدادات لتظهر الأصوات العربية الرجالية والنسائية.",Icons.Default.CloudOff)
        cloudLoading -> InfoCard("جارٍ تحميل الأصوات","نتصل بمكتبة الأصوات العربية الفصحى…",Icons.Default.CloudDownload)
-       cloudVoices.isEmpty() -> InfoCard("لا توجد أصوات سحابية متاحة","تحقق من تشغيل الخادم وتفعيل خدمة Google Cloud Text-to-Speech.",Icons.Default.Info)
+       cloudVoices.isEmpty() -> InfoCard("لا توجد أصوات عربية متاحة","تأكد من صحة مفتاح Sonex واتصال الإنترنت، ثم أعد فتح مكتبة الأصوات.",Icons.Default.Info)
        else -> cloudVoices.forEach { voice ->
         Surface(color=Panel,shape=RoundedCornerShape(17.dp),modifier=Modifier.fillMaxWidth().padding(bottom=9.dp),onClick={selectedCloudVoice=voice;selectedVoice=null;tab=0}) {
-         Row(Modifier.padding(15.dp),verticalAlignment=Alignment.CenterVertically) { Icon(Icons.Default.Cloud,null,tint=Cyan,modifier=Modifier.size(25.dp)); Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(voice.label,fontWeight=FontWeight.Bold); Text(voice.quality.ifBlank { "Google Cloud · العربية الفصحى" },color=Muted,fontSize=11.sp) }; if(selectedCloudVoice?.id==voice.id) Icon(Icons.Default.CheckCircle,null,tint=Cyan) }
+         Row(Modifier.padding(15.dp),verticalAlignment=Alignment.CenterVertically) { Icon(Icons.Default.Cloud,null,tint=Cyan,modifier=Modifier.size(25.dp)); Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(voice.label,fontWeight=FontWeight.Bold); Text("Sonex Labs · العربية الفصحى",color=Muted,fontSize=11.sp) }; if(selectedCloudVoice?.id==voice.id) Icon(Icons.Default.CheckCircle,null,tint=Cyan) }
         }
        }
       }
@@ -228,8 +238,39 @@ private fun SawtApp() {
       InfoCard("الأولوية للفصحى","المكتبة السحابية تستخدم ar-XA فقط. أصوات الهاتف المحلية قد تختلف ولا نضمن أنها فصحى.",Icons.Default.Translate)
       InfoCard("الخصوصية أولًا","القراءة المحلية تبقى على جهازك. عند اختيار صوت الفصحى السحابي يُرسل النص إلى خادم SAWT AI لتوليد ملف صوتي.",Icons.Default.Security)
       InfoCard("التشغيل في الخلفية","يمكن متابعة القراءة بعد مغادرة الشاشة عبر خدمة تشغيل صوت وإشعار تحكم.",Icons.Default.Headphones)
-      InfoCard("مكتبة الفصحى السحابية",if(apiUrl.isBlank()) "لم يتم ربط عنوان الخادم بعد؛ الأصوات السحابية لن تعمل قبل نشر الخادم وضبط عنوانه." else "الخادم: $apiUrl",Icons.Default.Cloud)
-      InfoCard("إصدار التطبيق","SAWT AI 1.1.0 · تطوير مكتبة الأصوات",Icons.Default.Info)
+      Surface(color=Panel,shape=RoundedCornerShape(20.dp),modifier=Modifier.fillMaxWidth()) {
+       Column(Modifier.padding(16.dp)) {
+        Text("ربط خدمة الصوت المجانية",fontWeight=FontWeight.Bold,fontSize=16.sp)
+        Spacer(Modifier.height(7.dp))
+        Text("أنشئ حسابًا مجانيًا في Sonex Labs، ثم أنشئ مفتاح API والصقه هنا. لا نحتاج بطاقة بنكية بحسب شروط الخطة المجانية المعلنة.",color=Muted,fontSize=12.sp,lineHeight=19.sp)
+        Spacer(Modifier.height(12.dp))
+        OutlinedTextField(value=apiKey,onValueChange={apiKey=it},modifier=Modifier.fillMaxWidth(),singleLine=true,label={Text("مفتاح API")},placeholder={Text("vsk_…")},visualTransformation=PasswordVisualTransformation(),shape=RoundedCornerShape(14.dp),colors=OutlinedTextFieldDefaults.colors(focusedBorderColor=Cyan,unfocusedBorderColor=Panel2,focusedContainerColor=Color(0xFF0B1422),unfocusedContainerColor=Color(0xFF0B1422)))
+        Spacer(Modifier.height(10.dp))
+        Button(onClick={
+         val key=apiKey.trim()
+         if(key.startsWith("vsk_") && key.length > 12) {
+          settings.edit().putString("sonex_api_key",key).apply()
+          savedApiKey=key
+          message="تم حفظ المفتاح. جارٍ تحميل الأصوات العربية."
+         } else message="تأكد من نسخ مفتاح Sonex كاملًا، ويبدأ عادةً بـ vsk_."
+        },modifier=Modifier.fillMaxWidth(),colors=ButtonDefaults.buttonColors(containerColor=Cyan,contentColor=Ink),shape=RoundedCornerShape(14.dp)) { Text("حفظ وربط الأصوات",fontWeight=FontWeight.Bold) }
+        TextButton(onClick={
+         settings.edit().remove("sonex_api_key").apply()
+         apiKey=""
+         savedApiKey=""
+         cloudVoices=emptyList()
+         selectedCloudVoice=null
+         message="تم حذف مفتاح الخدمة من هذا الجهاز."
+        },modifier=Modifier.fillMaxWidth()) { Text("حذف المفتاح من هذا الجهاز",color=Muted) }
+        OutlinedButton(onClick={
+         try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://sonexlabs.com"))) }
+         catch (_: Exception) { message="تعذر فتح الموقع. افتحه من متصفح Chrome." }
+        },modifier=Modifier.fillMaxWidth(),shape=RoundedCornerShape(14.dp)) { Text("فتح موقع Sonex لإنشاء حساب مجاني") }
+       }
+      }
+      InfoCard("حماية المفتاح","المفتاح لا يُضمّن داخل ملف APK ولا يُرفع إلى GitHub؛ يُحفظ في بيانات التطبيق الخاصة بهذا الهاتف. لا ترسله لأي شخص.",Icons.Default.Security)
+      InfoCard("الخصوصية","عند تحويل النص، يُرسل النص إلى Sonex Labs لإنشاء الصوت. لا تستخدم الخدمة للنصوص السرية.",Icons.Default.Security)
+      InfoCard("إصدار التطبيق","SAWT AI 1.2.0 · مكتبة صوت عربية عبر الإنترنت",Icons.Default.Info)
      }
     }
     Spacer(Modifier.height(28.dp))
