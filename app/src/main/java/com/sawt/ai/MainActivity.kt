@@ -9,6 +9,8 @@ import android.provider.MediaStore
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -310,6 +312,19 @@ private fun SawtStudio() {
 
                     Spacer(Modifier.height(22.dp))
                     Text("الصوت المحلي دون إنترنت", color = TextMain, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(9.dp))
+                    OutlinedButton(
+                        onClick = {
+                            val demo = Intent(Intent.ACTION_VIEW, Uri.parse("https://huggingface.co/spaces/NightPrince/Fasih-TTS"))
+                            context.startActivity(demo)
+                        },
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Gold),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, GoldSoft)
+                    ) {
+                        Text("تجربة الصوت الرجالي الفصيح عبر الإنترنت")
+                    }
+                    Text("الصوت الرجالي يفتح تجربة فصيحة خارجية ويحتاج إنترنت؛ لا يُنزّل داخل التطبيق.", color = TextMuted, fontSize = 10.sp, lineHeight = 16.sp)
                     Spacer(Modifier.height(6.dp))
                     Text("صوت نسائي عربي فصيح. نزّل المحرك مرة واحدة، ثم استخدمه دون اتصال بالشبكة.", color = TextMuted, fontSize = 11.sp, lineHeight = 18.sp)
                     Spacer(Modifier.height(10.dp))
