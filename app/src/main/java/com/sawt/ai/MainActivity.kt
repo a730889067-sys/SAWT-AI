@@ -6,6 +6,9 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -35,8 +38,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.webkit.WebViewAssetLoader
 import com.sawt.ai.audio.CloudVoiceClient
 import com.sawt.ai.audio.CloudVoiceOption
+import com.sawt.ai.audio.NabraBridgeEvent
+import com.sawt.ai.audio.NabraLocalBridge
 import com.sawt.ai.audio.SpeechPlaybackService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -75,6 +82,47 @@ private fun SawtStudio() {
     var lastFile by remember { mutableStateOf<File?>(null) }
     var status by remember { mutableStateOf("مساحة هادئة لتحويل النص إلى صوت") }
     var showHelp by remember { mutableStateOf(false) }
+    var localPageReady by remember { mutableStateOf(false) }
+    var localEngineReady by remember { mutableStateOf(false) }
+    var localLoading by remember { mutableStateOf(false) }
+    var localProgress by remember { mutableStateOf("") }
+    var localError by remember { mutableStateOf<String?>(null) }
+    var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    val localBridge = remember(context) {
+        NabraLocalBridge(context) { event ->
+            when (event) {
+                NabraBridgeEvent.PageReady -> localPageReady = true
+                is NabraBridgeEvent.Progress -> {
+                    val percent = if (event.total > 0) (event.loaded * 100 / event.total).toInt().coerceIn(0, 100) else 0
+                    localProgress = if (event.total > 0) "${event.name}: $percent%" else "جارٍ تجهيز ${event.name}…"
+                }
+                is NabraBridgeEvent.EngineReady -> {
+                    localEngineReady = true
+                    localLoading = false
+                    localError = null
+                    status = "الصوت النسائي المحلي جاهز. يمكنك التحويل دون إنترنت بعد اكتمال التنزيل."
+                }
+                is NabraBridgeEvent.AudioReady -> {
+                    lastFile = event.file
+                    generating = false
+                    SpeechPlaybackService.playFile(context, event.file.absolutePath)
+                    status = "اكتمل إنشاء الصوت المحلي وبدأ التشغيل."
+                }
+                is NabraBridgeEvent.Error -> {
+                    localLoading = false
+                    generating = false
+                    localError = event.message
+                    status = event.message
+                }
+                NabraBridgeEvent.ModelsRemoved -> {
+                    localEngineReady = false
+                    localLoading = false
+                    localProgress = ""
+                    status = "تم حذف ملفات الصوت المحلية. يلزم تنزيلها مجددًا للاستخدام دون إنترنت."
+                }
+            }
+        }
+    }
 
     LaunchedEffect(client) {
         if (client == null) {
@@ -116,6 +164,28 @@ private fun SawtStudio() {
                         .verticalScroll(rememberScrollState())
                         .padding(horizontal = 22.dp)
                 ) {
+                    AndroidView(
+                        factory = { viewContext ->
+                            val assetLoader = WebViewAssetLoader.Builder()
+                                .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(viewContext))
+                                .build()
+                            WebView(viewContext).apply {
+                                settings.javaScriptEnabled = true
+                                settings.domStorageEnabled = true
+                                settings.allowFileAccess = false
+                                settings.allowContentAccess = false
+                                settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
+                                addJavascriptInterface(localBridge, "SAWTBridge")
+                                webViewClient = object : WebViewClient() {
+                                    override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?) =
+                                        request?.url?.let(assetLoader::shouldInterceptRequest)
+                                }
+                                webViewRef = this
+                                loadUrl("https://appassets.androidplatform.net/assets/voice_engine/index.html")
+                            }
+                        },
+                        modifier = Modifier.size(1.dp)
+                    )
                     Spacer(Modifier.height(22.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -214,6 +284,48 @@ private fun SawtStudio() {
                         ) { female?.let { selectedVoice = it } }
                     }
 
+                    Spacer(Modifier.height(22.dp))
+                    Text("الصوت المحلي دون إنترنت", color = TextMain, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(6.dp))
+                    Text("صوت نسائي عربي فصيح. نزّل المحرك مرة واحدة، ثم استخدمه دون اتصال بالشبكة.", color = TextMuted, fontSize = 11.sp, lineHeight = 18.sp)
+                    Spacer(Modifier.height(10.dp))
+                    if (!localEngineReady) {
+                        Button(
+                            onClick = {
+                                localLoading = true
+                                localError = null
+                                localProgress = "بدء تنزيل محرك الصوت…"
+                                webViewRef?.evaluateJavascript("window.sawtTts?.load()", null)
+                            },
+                            enabled = localPageReady && !localLoading,
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = SurfaceRaised, contentColor = Gold)
+                        ) { Text(if (localLoading) "جارٍ تجهيز الصوت المحلي…" else "تنزيل وتجهيز الصوت المحلي") }
+                    } else {
+                        Button(
+                            onClick = {
+                                if (input.isNotBlank()) {
+                                    generating = true
+                                    lastFile = null
+                                    status = "جارٍ إنشاء الصوت محليًا…"
+                                    val safeText = org.json.JSONObject.quote(input.trim())
+                                    webViewRef?.evaluateJavascript("window.sawtTts.generate($safeText, 1.0)", null)
+                                }
+                            },
+                            enabled = !generating && input.isNotBlank(),
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = Background)
+                        ) { Text(if (generating) "جارٍ التحويل دون إنترنت…" else "تحويل النص محليًا دون إنترنت") }
+                        TextButton(onClick = { webViewRef?.evaluateJavascript("window.sawtTts.removeDownloadedModels()", null) }) {
+                            Text("حذف ملفات الصوت المحلية", color = TextMuted)
+                        }
+                    }
+                    if (localLoading || localProgress.isNotBlank()) {
+                        Text(localProgress, color = GoldSoft, fontSize = 11.sp)
+                        if (localLoading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Gold, trackColor = SurfaceRaised)
+                    }
+                    if (localError != null) Text(localError.orEmpty(), color = Color(0xFFE0A0A0), fontSize = 11.sp)
+
                     if (loading) {
                         Spacer(Modifier.height(14.dp))
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Gold, trackColor = SurfaceRaised)
@@ -294,7 +406,7 @@ private fun SawtStudio() {
                         ) {
                             Icon(Icons.Default.Download, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
-                            Text("حفظ ملف MP3")
+                            Text(if (file.extension.equals("wav", true)) "حفظ ملف WAV" else "حفظ ملف MP3")
                         }
                     }
 
@@ -372,11 +484,13 @@ private fun VoiceCard(
 }
 
 private fun saveAudioToDownloads(context: Context, source: File): String {
-    val filename = "SAWT-${System.currentTimeMillis()}.mp3"
+    val extension = if (source.extension.equals("wav", true)) "wav" else "mp3"
+    val mimeType = if (extension == "wav") "audio/wav" else "audio/mpeg"
+    val filename = "SAWT-${System.currentTimeMillis()}.$extension"
     if (Build.VERSION.SDK_INT >= 29) {
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-            put(MediaStore.MediaColumns.MIME_TYPE, "audio/mpeg")
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
             put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/SAWT AI")
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
