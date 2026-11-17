@@ -7,7 +7,6 @@
     "build": "node ./copy-wasm.mjs && vite build"
   },
   "dependencies": {
-    "nabra-tts": "0.1.0",
     "onnxruntime-web": "1.30.0"
   },
   "devDependencies": {
