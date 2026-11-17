@@ -48,7 +48,7 @@ class NabraLocalBridge(
 
     @JavascriptInterface
     @Synchronized
-    fun beginAudio(rate: Int) {
+    fun beginAudio(rate: Int): Boolean {
         try {
             closeActive(delete = true)
             sampleRate = rate.coerceIn(8_000, 48_000)
@@ -58,14 +58,16 @@ class NabraLocalBridge(
             output.write(ByteArray(WAV_HEADER_BYTES))
             activeFile = file
             activeOutput = output
+            return true
         } catch (error: Exception) {
             emit(NabraBridgeEvent.Error("تعذر تجهيز ملف الصوت: ${error.message ?: "خطأ في التخزين"}"))
+            return false
         }
     }
 
     @JavascriptInterface
     @Synchronized
-    fun appendAudioChunk(encoded: String) {
+    fun appendAudioChunk(encoded: String): Boolean {
         try {
             if (encoded.length > MAX_BASE64_CHUNK_CHARS) {
                 throw IllegalArgumentException("حزمة صوت أكبر من الحد الآمن.")
@@ -73,15 +75,17 @@ class NabraLocalBridge(
             val output = activeOutput ?: throw IllegalStateException("لم يبدأ تسجيل الصوت.")
             val bytes = Base64.decode(encoded, Base64.DEFAULT)
             output.write(bytes)
+            return true
         } catch (error: Exception) {
             closeActive(delete = true)
             emit(NabraBridgeEvent.Error("تعذر كتابة الصوت: ${error.message ?: "خطأ غير معروف"}"))
+            return false
         }
     }
 
     @JavascriptInterface
     @Synchronized
-    fun finishAudio() {
+    fun finishAudio(): Boolean {
         try {
             val output = activeOutput ?: throw IllegalStateException("لا يوجد ملف صوت مفتوح.")
             val file = activeFile ?: throw IllegalStateException("لم يتم إنشاء ملف الصوت.")
@@ -110,9 +114,11 @@ class NabraLocalBridge(
             activeOutput = null
             activeFile = null
             emit(NabraBridgeEvent.AudioReady(file))
+            return true
         } catch (error: Exception) {
             closeActive(delete = true)
             emit(NabraBridgeEvent.Error("تعذر إكمال ملف الصوت: ${error.message ?: "خطأ غير معروف"}"))
+            return false
         }
     }
 
