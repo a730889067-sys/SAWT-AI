@@ -1,29 +1,54 @@
-# SAWT AI voice policy
+# سياسة أصوات SAWT AI
 
-## Required catalogue
-SAWT AI's primary Arabic catalogue is Modern Standard Arabic only (العربية الفصحى), not regional dialect voices. It must provide exactly these first two voice profiles:
-- **Male Fusha Narrator:** deep, mature, warm, steady, and clearly articulated.
-- **Female Fusha Narrator:** clear, smooth, confident, and clearly articulated.
+## الأصوات المطلوبة
+كتالوج SAWT AI العربي الأساسي يجب أن يقتصر على العربية الفصحى الحديثة (MSA)، لا اللهجات المحلية، ويحتاج صوتين مختلفين فعليًا:
+- **راوٍ رجالي فصيح:** عميق، ناضج، دافئ، ثابت وواضح النطق.
+- **قارئة فصيحة:** طبيعية، واضحة، ناعمة وواثقة.
 
-These are product requirements. They are not satisfied by simply lowering the pitch of a female voice or by exposing whichever Arabic voice happens to be installed on a phone.
+هذه أوصاف للهدف وليست شهادة جودة. لا يُسمى صوت فصحى أو رجالي/نسائي أو يعمل دون إنترنت قبل التحقق من النموذج ومسار المعالجة والترخيص واختبارات الاستماع.
 
-## Local voice requirements
-- Prefer on-device model packs so users can generate speech without an account, API key, network connection, or per-character provider fee after downloading the model.
-- The application must download model packs only from the declared publisher/source, verify checksums, display model size, preserve required license notices, and handle interrupted downloads.
-- Do not mark a model as Android-compatible until it has been integrated and tested on Android devices.
-- Do not advertise a model as fully accurate Fusha until native Arabic listening QA covers emphatic letters, pharyngeal consonants, hamza, vowels, diacritics, numerals, and long passages.
-- Do not fall back silently to an installed system voice; clearly label any optional device voice as device-provided and unverified for the SAWT catalogue.
+## المرشح النسائي المحلي الحالي — بحث فقط
+**Nabra-82M sherpa-onnx**  
+https://huggingface.co/marwanelamami/nabra-82m-sherpa-onnx
 
-## Current candidate assessment (research only; not yet integrated)
-- **Nabra-7M-Distill:** its model card describes one Modern Standard Arabic voice, a single voice pack, a 28.7 MB model, Apache-2.0 licensing, and phone-class CPU measurements. The parent Nabra model identifies this as a female voice. It is a promising female candidate, but its published inference path uses a Python/Kokoro-based implementation; an Android-compatible runtime and on-device pronunciation tests are still required. Sources: https://huggingface.co/oddadmix/Nabra-7M-Distill and https://huggingface.co/oddadmix/Nabra-82M-v0.1
-- **3arab-TTS v2 VoiceDesign:** the model card describes voice design from text descriptions and an Apache-2.0 license, but reports about 553M parameters. This is too large to assume it will run well on ordinary Android phones; benchmark before considering it. Source: https://huggingface.co/sherif1313/3arab-TTS-500M-v2-VoiceDesign
-- **Fasih-TTS-V1:** its card describes a professional male MSA voice, but uses the Coqui Public Model License for non-commercial use. Do not include it in a public/commercial app unless the rights holder grants a separate suitable license. Source: https://huggingface.co/NightPrince/Fasih-TTS-V1
-- **Piper ar_JO-kareem:** this is labeled Arabic (Jordan), not verified MSA, and its model card says the training-data license is "See URL"; do not present it as the approved Fusha male voice without further rights and pronunciation verification. Source: https://huggingface.co/rhasspy/piper-voices/tree/main/ar/ar_JO/kareem/medium
+- يصف ناشر النموذج أنه صوت واحد `af_msa` (speaker 0) للعربية الفصحى الحديثة، بمعدل 24 kHz.
+- نسخة INT8 المنشورة نحو 83 MB، ونسخة INT4 نحو 57 MB؛ يذكر الناشر ضجيجًا خافتًا في INT4، ولذلك INT8 هو المرشح الأنسب للجودة.
+- صفحة النموذج تعرض رخصة Apache-2.0.
+- الملفات الأساسية: `model.int8.onnx`، `tokens.txt`، `voices.bin`.
+- صفحة النموذج تعرض مثالًا باستخدام sherpa-onnx، لكن هذا لا يثبت أن ملفات النموذج وحدها تكفي لقراءة نص عربي عادي بجودة عالية داخل كل إصدار Android.
 
-- **Nabra-7M-Distill ONNX:** an Apache-2.0 ONNX export exists (16 MB FP16) and its JavaScript package runs in a browser using ONNX Runtime Web and bundled eSpeak-NG WASM. This makes a WebView proof-of-concept plausible, but it is still only one female MSA voice, not a native Android engine already verified in SAWT AI. The package also bundles eSpeak-NG under GPL-3.0-or-later, which requires preserving its license/notice and reviewing distribution obligations. Sources: https://huggingface.co/oddadmix/Nabra-7M-Distill-ONNX and https://github.com/Oddadmix/nabra-tts
-- **Habibi-TTS Specialized/MSA:** the MSA checkpoint is Apache-2.0 and an ONNX export exists, but the source checkpoint is about 1.35 GB and its ONNX path is in-context voice cloning that requires a reference recording and transcript. It is not a pair of ready-made male/female presets, and its Android latency/memory use is unverified. Sources: https://huggingface.co/SWivid/Habibi-TTS/tree/main/Specialized/MSA and https://huggingface.co/OpenVoiceOS/phoonnx-f5tts
-- **A3S:** the published model lists three Arabic speaker identities and Apache-2.0, but its model is reported at about 0.9B parameters and its example inference loads it on CUDA. It is not a sensible default for ordinary Android phones without an optimized mobile export and device benchmarks. Source: https://huggingface.co/MahmoudIbrahim/A3S
-- **Arabic FastPitch multi-speaker ONNX community weights:** a repository reports one additional male and two female speakers, but describes the multispeaker model as in progress and the weight/license chain is not clear enough for SAWT AI distribution. Do not package it without rights verification and human listening QA. Source: https://github.com/asgmodel/modeltts-ar
+**شرط مهم في المعالجة العربية:** العرض الرسمي لنموذج Nabra يوضح خط أنابيب يتضمن تطبيع النص، والتشكيل الآلي عبر Camel Tools MLE، ثم تحويل الحروف إلى فونيمات عبر eSpeak-NG/Misaki قبل Kokoro. كما أن واجهة sherpa-onnx Kotlin في الإصدارات الحديثة توضح أن `dataDir` لم يعد مسار phonemization تلقائيًا، وأن الإدخال المسبق على هيئة `phonemeCodepoints` أو `tokens` أصبح مطلوبًا في ذلك المسار. لذلك لا يجوز الاكتفاء بتحميل ملف ONNX وإرسال نص عربي غير مضبوط ثم إعلان دقة الفصحى. يجب نقل/توفير مسار تشكيل وفونيمات متوافق واختباره على Android.
 
-## Cloud voice policy
-The previous Google Cloud ar-XA backend is a cloud service, not an offline/free voice pack. It may be offered only as a separate optional mode after deployment, billing, quotas, cost disclosures, and privacy controls are configured. Never imply that unlimited cloud synthesis is free.
+المراجع:
+- https://huggingface.co/marwanelamami/nabra-82m-sherpa-onnx
+- https://huggingface.co/spaces/oddadmix/Nabra-82M-Demo
+- https://github.com/k2-fsa/sherpa-onnx/blob/master/sherpa-onnx/kotlin-api/Tts.kt
+
+## الصوت الرجالي المحلي
+لم يُعتمد بعد نموذج رجالي محلي يحقق جميع الشروط معًا: فصحى موثقة، ترخيص مناسب للتوزيع، محرك Android قابل للتشغيل، وأداء مقبول على الهاتف. لا نرفع طبقة صوت أنثوي ولا نستخدم صوت نظام الهاتف كبديل رجالي.
+
+مرشح Fasih-TTS-V1 يصفه ناشره بأنه صوت رجالي فصيح، لكن رخصة Coqui Public Model License غير تجارية ووزنه كبير، ومسار التشغيل المنشور لا يثبت تشغيله محليًا على Android. لا يُضمّن في إصدار عام دون تصريح وترخيص مناسب واختبارات.
+
+## قواعد تنزيل الحزم المحلية
+- عرض الحجم، اللغة، نوع الصوت، إصدار النموذج، مصدر التنزيل، الترخيص وحالة التحقق قبل التنزيل.
+- تنزيل الملفات من المصدر المحدد عبر HTTPS.
+- التحقق من SHA-256 لكل ملف بعد التنزيل.
+- استخدام تنزيل قابل للاستئناف أو إعادة البدء الآمن، وعدم تشغيل الملف الجزئي.
+- تخزين ملفات النموذج في مساحة التطبيق الخاصة وإتاحة حذف الحزمة.
+- إبقاء التطبيق واضحًا بشأن حالة الاتصال: بعد تنزيل حزمة محلية مكتملة يجب أن يعمل التحويل دون إنترنت.
+- تضمين إشعارات التراخيص التابعة للمحرك وeSpeak-NG وأي أدوات phonemization قبل التوزيع.
+
+## سياسة السحابة
+يمكن عرض Google Cloud `ar-XA` كخيار منفصل بعد نشر الخادم، وتأمينه بمصادقة وحصص استخدام ومراقبة تكلفة وسياسة خصوصية. يتطلب إعداد الفوترة ولا يعد خدمة مجانية غير محدودة. لا تضع مفاتيح الخدمة داخل APK.
+
+## شروط إعلان الصوت جاهزًا
+1. التحقق من السلسلة الكاملة للتراخيص.
+2. إنشاء صوت حقيقي من نص عربي عادي ومن نص مشكول.
+3. الاستماع البشري إلى ع، ح، ص، ض، ط، ظ، ث، ذ، ق، الهمزات، التنوين والأرقام والأسماء.
+4. التأكد من طبيعية الهوية الصوتية ووضوح النطق وعدم وجود تقطيع أو ضجيج مزعج.
+5. قياس زمن التحويل، الذاكرة، الحرارة وحجم الملفات على جهاز Android 11 فعلي.
+6. اختبار التشغيل والحفظ والعمل دون إنترنت بعد تنزيل الحزمة.
+7. إبقاء النموذج مخفيًا من الخيارات حتى ينجح في الاختبارات.
+
+## حالة هذا المستودع
+المحرك المحلي غير مكتمل بعد، ولا توجد حزم صوت محلية معتمدة مدمجة في APK. وجود مرشح بحثي لا يعني أن الصوت يعمل داخل التطبيق. لا يُعلن الإصدار نهائيًا قبل اجتياز جميع الشروط أعلاه.
