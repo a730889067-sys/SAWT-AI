@@ -51,6 +51,7 @@ private val GoldSoft = Color(0xFFB99A5C)
 private val TextMain = Color(0xFFF5F1E8)
 private val TextMuted = Color(0xFF9B978E)
 private val Border = Color(0xFF302B22)
+private const val MAX_TEXT_BYTES = 5_000
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -159,7 +160,7 @@ private fun SawtStudio() {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("النص", color = TextMain, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.weight(1f))
-                        Text("${input.length} / 5000", color = TextMuted, fontSize = 11.sp)
+                        Text("${input.length} حرف · ${input.toByteArray(Charsets.UTF_8).size} / $MAX_TEXT_BYTES بايت", color = TextMuted, fontSize = 10.sp)
                     }
                     Spacer(Modifier.height(10.dp))
                     Surface(
@@ -170,7 +171,15 @@ private fun SawtStudio() {
                     ) {
                         OutlinedTextField(
                             value = input,
-                            onValueChange = { if (it.length <= 5000) { input = it; lastFile = null } },
+                            onValueChange = { nextValue ->
+                                val byteCount = nextValue.toByteArray(Charsets.UTF_8).size
+                                if (nextValue.length <= 5000 && byteCount <= MAX_TEXT_BYTES) {
+                                    input = nextValue
+                                    lastFile = null
+                                } else {
+                                    status = "الحد الأقصى للنص في الطلب الواحد 5000 بايت."
+                                }
+                            },
                             modifier = Modifier.fillMaxWidth().heightIn(min = 205.dp),
                             placeholder = { Text("اكتب أو الصق النص هنا…", color = TextMuted) },
                             textStyle = LocalTextStyle.current.copy(color = TextMain, fontSize = 16.sp, lineHeight = 28.sp),
@@ -272,7 +281,7 @@ private fun SawtStudio() {
                                 scope.launch {
                                     try {
                                         val name = withContext(Dispatchers.IO) { saveAudioToDownloads(context, file) }
-                                        status = "تم حفظ $name في مجلد التنزيلات."
+                                        status = if (Build.VERSION.SDK_INT >= 29) "تم حفظ $name في مجلد التنزيلات." else "تم حفظ $name في مجلد ملفات SAWT AI الخاص بالتطبيق."
                                     } catch (_: Exception) {
                                         status = "تعذر حفظ الملف. حاول مرة أخرى."
                                     }
