@@ -1,8 +1,13 @@
 package com.sawt.ai
 
 import android.os.Bundle
+import android.os.Build
+import android.Manifest
+import android.content.pm.PackageManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -46,6 +51,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun SawtApp() {
  val context = androidx.compose.ui.platform.LocalContext.current
+ val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
  var text by remember { mutableStateOf("") }
  var selectedVoice by remember { mutableStateOf<VoiceOption?>(null) }
  var voices by remember { mutableStateOf<List<VoiceOption>>(emptyList()) }
@@ -117,7 +123,7 @@ private fun SawtApp() {
       }
       Spacer(Modifier.height(17.dp))
       Button(onClick={
-       when { text.isBlank()->message="اكتب نصًا أولًا."; selectedVoice==null->message="ثبّت صوتًا عربيًا من إعدادات الجهاز أولًا."; else->{ SpeechPlaybackService.start(context,text,selectedVoice!!.name,rate,pitch); message="بدأ التشغيل؛ يمكنك متابعة الاستماع في الخلفية." } }
+       when { text.isBlank()->message="اكتب نصًا أولًا."; selectedVoice==null->message="ثبّت صوتًا عربيًا من إعدادات الجهاز أولًا."; else->{ if(Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS); SpeechPlaybackService.start(context,text,selectedVoice!!.name,rate,pitch); message="بدأ التشغيل؛ يمكنك متابعة الاستماع في الخلفية." } }
       },modifier=Modifier.fillMaxWidth().height(56.dp),shape=RoundedCornerShape(17.dp),colors=ButtonDefaults.buttonColors(containerColor=Cyan,contentColor=Ink)) { Icon(Icons.Default.PlayArrow,null); Spacer(Modifier.width(8.dp)); Text("استمع الآن",fontWeight=FontWeight.Bold,fontSize=16.sp) }
       Spacer(Modifier.height(8.dp))
       OutlinedButton(onClick={SpeechPlaybackService.stop(context);message="تم إيقاف التشغيل."},modifier=Modifier.fillMaxWidth(),shape=RoundedCornerShape(15.dp)) { Icon(Icons.Default.Stop,null); Spacer(Modifier.width(7.dp)); Text("إيقاف الصوت") }
