@@ -28,6 +28,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -189,6 +190,8 @@ private fun SawtStudio() {
                                 settings.domStorageEnabled = true
                                 settings.allowFileAccess = false
                                 settings.allowContentAccess = false
+                                settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                                settings.javaScriptCanOpenWindowsAutomatically = false
                                 settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
                                 addJavascriptInterface(localBridge, "SAWTBridge")
                                 webViewClient = object : WebViewClient() {
@@ -202,7 +205,7 @@ private fun SawtStudio() {
                                 loadUrl("https://appassets.androidplatform.net/assets/voice_engine/index.html")
                             }
                         },
-                        modifier = Modifier.size(1.dp)
+                        modifier = Modifier.size(1.dp).alpha(0f)
                     )
                     Spacer(Modifier.height(22.dp))
                     Row(
