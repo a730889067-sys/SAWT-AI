@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.media.MediaPlayer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import androidx.core.app.NotificationCompat
@@ -14,6 +15,7 @@ import java.util.Locale
 
 class SpeechPlaybackService:Service(),TextToSpeech.OnInitListener {
  private var tts:TextToSpeech?=null
+ private var mediaPlayer:MediaPlayer?=null
  private var pendingText=""
  private var voiceName:String?=null
  private var rate=1f
@@ -22,7 +24,14 @@ class SpeechPlaybackService:Service(),TextToSpeech.OnInitListener {
  override fun onCreate(){super.onCreate();createChannel();tts=TextToSpeech(this,this)}
  override fun onStartCommand(intent:Intent?,flags:Int,startId:Int):Int {
   when(intent?.action) {
-   ACTION_STOP->{tts?.stop();stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();return START_NOT_STICKY}
+   ACTION_STOP->{tts?.stop();mediaPlayer?.stopSafely();stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();return START_NOT_STICKY}
+   ACTION_PLAY_FILE->{
+    val path=intent.getStringExtra(EXTRA_FILE).orEmpty()
+    if(path.isBlank()){stopSelf();return START_NOT_STICKY}
+    tts?.stop()
+    startForeground(NOTIFICATION_ID,notification())
+    playFile(path)
+   }
    ACTION_SPEAK->{
     pendingText=intent.getStringExtra(EXTRA_TEXT).orEmpty()
     voiceName=intent.getStringExtra(EXTRA_VOICE)
@@ -50,6 +59,16 @@ class SpeechPlaybackService:Service(),TextToSpeech.OnInitListener {
   engine.speak(pendingText,TextToSpeech.QUEUE_FLUSH,null,"sawt-"+System.currentTimeMillis())
   pendingText=""
  }
+ private fun playFile(path:String) {
+  mediaPlayer?.stopSafely()
+  mediaPlayer=MediaPlayer().apply {
+   setOnPreparedListener { it.start() }
+   setOnCompletionListener { player -> player.release(); if(mediaPlayer===player) mediaPlayer=null; stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() }
+   setOnErrorListener { player,_,_ -> player.release(); if(mediaPlayer===player) mediaPlayer=null; stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(); true }
+   try { setDataSource(path); prepareAsync() } catch (_:Exception) { release(); mediaPlayer=null; stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() }
+  }
+ }
+ private fun MediaPlayer.stopSafely(){ try { stop() } catch (_:Exception) {}; try { release() } catch (_:Exception) {} }
  private fun notification():Notification {
   val open=PendingIntent.getActivity(this,0,Intent(this,MainActivity::class.java),PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
   val stop=PendingIntent.getService(this,1,Intent(this,SpeechPlaybackService::class.java).setAction(ACTION_STOP),PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -61,7 +80,7 @@ class SpeechPlaybackService:Service(),TextToSpeech.OnInitListener {
   if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.O)getSystemService(NotificationManager::class.java)
    .createNotificationChannel(NotificationChannel(CHANNEL_ID,"تشغيل الصوت",NotificationManager.IMPORTANCE_LOW))
  }
- override fun onDestroy(){tts?.stop();tts?.shutdown();super.onDestroy()}
+ override fun onDestroy(){tts?.stop();tts?.shutdown();mediaPlayer?.stopSafely();mediaPlayer=null;super.onDestroy()}
  override fun onBind(intent:Intent?):IBinder?=null
 
  companion object {
@@ -69,12 +88,18 @@ class SpeechPlaybackService:Service(),TextToSpeech.OnInitListener {
   private const val NOTIFICATION_ID=41
   private const val ACTION_SPEAK="com.sawt.ai.SPEAK"
   private const val ACTION_STOP="com.sawt.ai.STOP"
+  private const val ACTION_PLAY_FILE="com.sawt.ai.PLAY_FILE"
+  private const val EXTRA_FILE="file"
   private const val EXTRA_TEXT="text"
   private const val EXTRA_VOICE="voice"
   private const val EXTRA_RATE="rate"
   private const val EXTRA_PITCH="pitch"
   fun start(context:Context,text:String,voice:String?,rate:Float,pitch:Float) {
    val i=Intent(context,SpeechPlaybackService::class.java).apply{action=ACTION_SPEAK;putExtra(EXTRA_TEXT,text);putExtra(EXTRA_VOICE,voice);putExtra(EXTRA_RATE,rate);putExtra(EXTRA_PITCH,pitch)}
+   if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.O)context.startForegroundService(i) else context.startService(i)
+  }
+  fun playFile(context:Context,path:String) {
+   val i=Intent(context,SpeechPlaybackService::class.java).apply{action=ACTION_PLAY_FILE;putExtra(EXTRA_FILE,path)}
    if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.O)context.startForegroundService(i) else context.startService(i)
   }
   fun stop(context:Context){context.startService(Intent(context,SpeechPlaybackService::class.java).setAction(ACTION_STOP))}
