@@ -115,7 +115,9 @@ function sendPcm(bytes) {
   if (!bridge) throw new Error("تعذر الاتصال بتطبيق SAWT AI.");
   const chunkSize = 48 * 1024;
   for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    if (!bridge.appendAudioChunk(base64(bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length))))) {\n      throw new Error("تعذرت كتابة جزء من ملف الصوت.");\n    }
+    if (!bridge.appendAudioChunk(base64(bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length))))) {
+      throw new Error("تعذرت كتابة جزء من ملف الصوت.");
+    }
   }
 }
 
