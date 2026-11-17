@@ -92,7 +92,10 @@ private fun SawtStudio() {
     val localBridge = remember(context) {
         NabraLocalBridge(context) { event ->
             when (event) {
-                NabraBridgeEvent.PageReady -> {\n                    localPageReady = true\n                    if (!localEngineReady) status = "محرك الصوت المحلي جاهز للتجهيز."\n                }
+                NabraBridgeEvent.PageReady -> {
+                    localPageReady = true
+                    if (!localEngineReady) status = "محرك الصوت المحلي جاهز للتجهيز."
+                }
                 is NabraBridgeEvent.Progress -> {
                     val percent = if (event.total > 0) (event.loaded * 100 / event.total).toInt().coerceIn(0, 100) else 0
                     localProgress = if (event.total > 0) "${event.name}: $percent%" else "جارٍ تجهيز ${event.name}…"
@@ -427,7 +430,7 @@ private fun SawtStudio() {
                         ) {
                             Icon(Icons.Default.Download, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
-                            Text(if (file.extension.equals("wav", true)) "حفظ ملف WAV" else "حفظ ملف MP3")
+                            Text(if (lastFile?.extension.equals("wav", true) == true) "حفظ ملف WAV" else "حفظ ملف MP3")
                         }
                     }
 
