@@ -18,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -72,6 +73,7 @@ private fun SawtStudio() {
     var generating by remember { mutableStateOf(false) }
     var lastFile by remember { mutableStateOf<File?>(null) }
     var status by remember { mutableStateOf("مساحة هادئة لتحويل النص إلى صوت") }
+    var showHelp by remember { mutableStateOf(false) }
 
     LaunchedEffect(client) {
         if (client == null) {
@@ -131,6 +133,17 @@ private fun SawtStudio() {
                         Column(Modifier.weight(1f)) {
                             Text("SAWT AI", color = TextMain, fontSize = 21.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
                             Text("استوديو الصوت العربي", color = TextMuted, fontSize = 11.sp)
+                        }
+                        IconButton(
+                            onClick = { showHelp = true },
+                            modifier = Modifier.size(38.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.HelpOutline,
+                                contentDescription = "طريقة الاستخدام",
+                                tint = Gold,
+                                modifier = Modifier.size(21.dp)
+                            )
                         }
                         Surface(color = Color(0xFF211C13), shape = CircleShape) {
                             Text("الفصحى", color = Gold, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp))
@@ -282,6 +295,35 @@ private fun SawtStudio() {
                     Text("SAWT AI  •  ARABIC VOICE STUDIO", color = Color(0xFF625A4B), fontSize = 9.sp, letterSpacing = 1.2.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                     Spacer(Modifier.height(18.dp))
                 }
+            }
+            if (showHelp) {
+                AlertDialog(
+                    onDismissRequest = { showHelp = false },
+                    containerColor = SurfaceDark,
+                    title = {
+                        Text(
+                            "طريقة استخدام SAWT AI",
+                            color = Gold,
+                            fontWeight = FontWeight.Bold
+                        )
+                    },
+                    text = {
+                        Text(
+                            "١. اكتب النص أو الصقه في المربع، حتى ٥٠٠٠ حرف.\n\n" +
+                                "٢. اختر الصوت الرجالي أو النسائي عندما يظهر أنه متاح.\n\n" +
+                                "٣. اضغط «إنشاء الصوت والاستماع» لبدء التحويل.\n\n" +
+                                "٤. بعد اكتمال الصوت، اضغط «حفظ ملف MP3» لحفظه في التنزيلات.\n\n" +
+                                "تنبيه: يجب أن تكون مكتبة الصوت مفعّلة. الأصوات المحلية تعمل دون إنترنت بعد تنزيل حزمها، أما الصوت السحابي فيحتاج اتصالًا بالإنترنت.",
+                            color = TextMain,
+                            lineHeight = 23.sp
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { showHelp = false }) {
+                            Text("حسنًا", color = Gold)
+                        }
+                    }
+                )
             }
         }
     }
