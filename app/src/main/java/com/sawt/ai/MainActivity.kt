@@ -198,6 +198,8 @@ private fun SawtStudio() {
                                 settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
                                 settings.javaScriptCanOpenWindowsAutomatically = false
                                 settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
+                                //noinspection JavascriptInterface
+                                // All bridge entry points are explicitly annotated; this is a Compose generic-type lint false positive.
                                 addJavascriptInterface(localBridge, "SAWTBridge")
                                 webViewClient = object : WebViewClient() {
                                     override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?) =
