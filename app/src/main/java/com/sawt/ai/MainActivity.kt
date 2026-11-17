@@ -113,7 +113,7 @@ private fun SawtApp() {
     when(tab) {
      0 -> {
       Text("حوّل كلماتك إلى صوت",fontSize=25.sp,fontWeight=FontWeight.Bold)
-      Spacer(Modifier.height(6.dp)); Text("أصوات عربية فصيحة، بتجربة بسيطة وأنيقة.",color=Muted,fontSize=13.sp)
+      Spacer(Modifier.height(6.dp)); Text("مكتبة فصحى سحابية، وتجربة استماع عربية بسيطة وأنيقة.",color=Muted,fontSize=13.sp)
       Spacer(Modifier.height(20.dp))
       Surface(color=Panel,shape=RoundedCornerShape(22.dp),modifier=Modifier.fillMaxWidth()) {
        Column(Modifier.padding(16.dp)) {
@@ -239,7 +239,6 @@ private fun SawtApp() {
  }
 }
 
-@Composable
 private fun saveAudioToDownloads(context: android.content.Context, source: File): String {
  val filename = "SAWT-${System.currentTimeMillis()}.mp3"
  if (Build.VERSION.SDK_INT >= 29) {
