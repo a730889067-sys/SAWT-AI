@@ -91,7 +91,7 @@ private fun SawtStudio() {
     val localBridge = remember(context) {
         NabraLocalBridge(context) { event ->
             when (event) {
-                NabraBridgeEvent.PageReady -> localPageReady = true
+                NabraBridgeEvent.PageReady -> {\n                    localPageReady = true\n                    if (!localEngineReady) status = "محرك الصوت المحلي جاهز للتجهيز."\n                }
                 is NabraBridgeEvent.Progress -> {
                     val percent = if (event.total > 0) (event.loaded * 100 / event.total).toInt().coerceIn(0, 100) else 0
                     localProgress = if (event.total > 0) "${event.name}: $percent%" else "جارٍ تجهيز ${event.name}…"
@@ -119,6 +119,21 @@ private fun SawtStudio() {
                     localLoading = false
                     localProgress = ""
                     status = "تم حذف ملفات الصوت المحلية. يلزم تنزيلها مجددًا للاستخدام دون إنترنت."
+                }
+            }
+        }
+    }
+
+    DisposableEffect(localBridge) {
+        onDispose {
+            localBridge.close()
+            webViewRef?.let { web ->
+                try {
+                    web.removeJavascriptInterface("SAWTBridge")
+                    web.stopLoading()
+                    web.loadUrl("about:blank")
+                    web.destroy()
+                } catch (_: Exception) {
                 }
             }
         }
@@ -179,6 +194,9 @@ private fun SawtStudio() {
                                 webViewClient = object : WebViewClient() {
                                     override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?) =
                                         request?.url?.let(assetLoader::shouldInterceptRequest)
+
+                                    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean =
+                                        request?.url?.host != "appassets.androidplatform.net"
                                 }
                                 webViewRef = this
                                 loadUrl("https://appassets.androidplatform.net/assets/voice_engine/index.html")
@@ -309,7 +327,7 @@ private fun SawtStudio() {
                                     lastFile = null
                                     status = "جارٍ إنشاء الصوت محليًا…"
                                     val safeText = org.json.JSONObject.quote(input.trim())
-                                    webViewRef?.evaluateJavascript("window.sawtTts.generate($safeText, 1.0)", null)
+                                    webViewRef?.evaluateJavascript("window.sawtTts.generate($safeText, 1.0).catch(function(){})", null)
                                 }
                             },
                             enabled = !generating && input.isNotBlank(),
