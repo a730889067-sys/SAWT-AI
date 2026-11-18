@@ -158,7 +158,9 @@ class SupertonicTtsEngine(context: Context) {
         val config = GenerationConfig(
             sid = speakerId,
             speed = speed.coerceIn(0.8f, 1.2f),
-            numSteps = qualitySteps.coerceIn(4, 8),
+            // Supertonic quality steps increase inference work. On this app's
+            // low-memory target, keep the fast preset as a hard upper bound.
+            numSteps = qualitySteps.coerceIn(4, 4),
             extra = mapOf("lang" to language)
         )
         val audio = try {
@@ -204,7 +206,10 @@ class SupertonicTtsEngine(context: Context) {
             ttsJson = "tts.json",
             unicodeIndexer = "unicode_indexer.bin",
             voiceStyle = "voice.bin",
-            numThreads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
+            // Keep ONNX CPU workers bounded on low-memory Android phones.
+            // More workers can multiply intermediate tensor buffers and trigger
+            // memory pressure on devices with only 2 GB RAM.
+            numThreads = Runtime.getRuntime().availableProcessors().coerceIn(1, 2)
         )
         return OfflineTts(config = config)
     }
