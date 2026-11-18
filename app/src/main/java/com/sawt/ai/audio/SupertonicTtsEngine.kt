@@ -158,7 +158,7 @@ class SupertonicTtsEngine(context: Context) {
         val config = GenerationConfig(
             sid = speakerId,
             speed = speed.coerceIn(0.8f, 1.2f),
-            numSteps = qualitySteps.coerceIn(5, 12),
+            numSteps = qualitySteps.coerceIn(4, 8),
             extra = mapOf("lang" to language)
         )
         val audio = try {
@@ -204,7 +204,7 @@ class SupertonicTtsEngine(context: Context) {
             ttsJson = "tts.json",
             unicodeIndexer = "unicode_indexer.bin",
             voiceStyle = "voice.bin",
-            numThreads = 2
+            numThreads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
         )
         return OfflineTts(config = config)
     }
