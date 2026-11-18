@@ -2,6 +2,7 @@ package com.sawt.ai
 
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -20,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.HelpOutline
@@ -164,6 +166,18 @@ private fun SawtStudio() {
                     Text("صوتٌ يليق بكلماتك", color = TextMain, fontSize = 27.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(7.dp))
                     Text("أصوات عربية وإنجليزية تعمل على هاتفك", color = TextMuted, fontSize = 13.sp)
+
+                    Spacer(Modifier.height(15.dp))
+                    OutlinedButton(
+                        onClick = { context.startActivity(Intent(context, ChatActivity::class.java)) },
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        border = BorderStroke(1.dp, GoldSoft),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Gold)
+                    ) {
+                        Icon(Icons.Default.Chat, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("افتح المساعد الذكي وتحدث معه", fontWeight = FontWeight.SemiBold)
+                    }
 
                     Spacer(Modifier.height(25.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
