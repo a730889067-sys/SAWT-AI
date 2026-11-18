@@ -99,7 +99,7 @@ class SupertonicTtsEngine(context: Context) {
                         GenerationConfig(
                             sid = speaker,
                             speed = 1.0f,
-                            numSteps = 5,
+                            numSteps = 4,
                             extra = mapOf("lang" to lang)
                         )
                     )
