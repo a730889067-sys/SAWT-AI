@@ -29,15 +29,25 @@ object GeminiChatClient {
         require(recent.isNotEmpty()) { "اكتب رسالتك أولًا." }
         require(recent.last().text.length <= MAX_INPUT_CHARS) { "الرسالة طويلة جدًا. قسّمها إلى أجزاء أقصر." }
 
-        val contents = JSONArray()
-        recent.forEach { turn ->
-            if (turn.text.isNotBlank()) {
-                contents.put(
-                    JSONObject()
-                        .put("role", if (turn.role == "assistant") "model" else "user")
-                        .put("parts", JSONArray().put(JSONObject().put("text", turn.text)))
-                )
+        // Gemini chat history is normalized so a failed prior request cannot
+        // leave two adjacent user turns that may be rejected by some endpoints.
+        val normalized = mutableListOf<ChatTurn>()
+        recent.filter { it.text.isNotBlank() }.forEach { turn ->
+            val previous = normalized.lastOrNull()
+            if (previous != null && previous.role == turn.role) {
+                normalized[normalized.lastIndex] = previous.copy(text = previous.text + "\n\n" + turn.text)
+            } else {
+                normalized.add(turn)
             }
+        }
+
+        val contents = JSONArray()
+        normalized.forEach { turn ->
+            contents.put(
+                JSONObject()
+                    .put("role", if (turn.role == "assistant") "model" else "user")
+                    .put("parts", JSONArray().put(JSONObject().put("text", turn.text)))
+            )
         }
 
         val request = JSONObject()
