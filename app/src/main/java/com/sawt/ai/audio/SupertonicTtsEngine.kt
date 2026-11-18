@@ -233,9 +233,14 @@ class SupertonicTtsEngine(context: Context) {
     }
 
     private fun upgradeInstalledModel(onProgress: (Long, Long) -> Unit) {
+        val availableBytes = StatFs(appContext.filesDir.absolutePath).availableBytes
+        if (availableBytes < MINIMUM_OPTIMIZATION_SPACE_BYTES) {
+            throw IOException("يلزم توفر 160 ميجابايت على الأقل لتنزيل تحسين سرعة الصوت.")
+        }
         val optimizedVector = File(appContext.cacheDir, "vector_estimator.mobile.tmp")
         try {
             downloadOptimizedVectorEstimator(optimizedVector, onProgress)
+            close()
             replaceFileSafely(optimizedVector, File(modelDirectory, VECTOR_FILE))
             File(modelDirectory, ".sawt-verified").writeText(OPTIMIZED_INSTALL_MARKER)
         } catch (error: Exception) {
@@ -411,6 +416,7 @@ class SupertonicTtsEngine(context: Context) {
         const val VECTOR_FILE = "vector_estimator.int8.onnx"
         const val OPTIMIZED_INSTALL_MARKER = ARCHIVE_SHA256 + ":" + OPTIMIZED_VECTOR_SHA256
         const val MINIMUM_FREE_SPACE_BYTES = 600L * 1024L * 1024L
+        const val MINIMUM_OPTIMIZATION_SPACE_BYTES = 160L * 1024L * 1024L
         const val MAX_SINGLE_FILE_BYTES = 350L * 1024L * 1024L
         const val MAX_TOTAL_EXTRACTED_BYTES = 500L * 1024L * 1024L
 
