@@ -46,9 +46,9 @@ object GeminiChatClient {
             .put(
                 "generationConfig",
                 JSONObject()
-                    .put("temperature", 0.65)
                     .put("topP", 0.9)
                     .put("maxOutputTokens", 700)
+                    .put("thinkingConfig", JSONObject().put("thinkingLevel", "LOW"))
             )
 
         val connection = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
