@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
@@ -95,7 +96,7 @@ private fun SawtStudio() {
     var language by remember { mutableStateOf("ar") }
     var selectedVoice by remember { mutableStateOf(maleVoices.first()) }
     var speed by remember { mutableFloatStateOf(1.0f) }
-    var qualitySteps by remember { mutableIntStateOf(8) }
+    var qualitySteps by remember { mutableIntStateOf(4) }
     var modelReady by remember { mutableStateOf(engine.isModelInstalled()) }
     var modelLoading by remember { mutableStateOf(false) }
     var modelProgress by remember { mutableIntStateOf(0) }
@@ -277,7 +278,7 @@ private fun SawtStudio() {
                                         language = language,
                                         speakerId = selectedVoice.speakerId,
                                         speed = speed,
-                                        qualitySteps = 8
+                                        qualitySteps = 4
                                     )
                                     lastFile = sample
                                     lastVoiceName = selectedVoice.name
@@ -320,9 +321,9 @@ private fun SawtStudio() {
                     Text("الجودة", color = TextMuted, fontSize = 12.sp)
                     Spacer(Modifier.height(7.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(7.dp), modifier = Modifier.fillMaxWidth()) {
-                        QualityButton("سريع", 5, qualitySteps == 5, Modifier.weight(1f)) { qualitySteps = 5 }
-                        QualityButton("متوازن", 8, qualitySteps == 8, Modifier.weight(1f)) { qualitySteps = 8 }
-                        QualityButton("أعلى جودة", 12, qualitySteps == 12, Modifier.weight(1f)) { qualitySteps = 12 }
+                        QualityButton("سريع", 4, qualitySteps == 4, Modifier.weight(1f)) { qualitySteps = 4 }
+                        QualityButton("متوازن", 6, qualitySteps == 6, Modifier.weight(1f)) { qualitySteps = 6 }
+                        QualityButton("أعلى جودة", 8, qualitySteps == 8, Modifier.weight(1f)) { qualitySteps = 8 }
                     }
 
                     Spacer(Modifier.height(23.dp))
@@ -418,6 +419,7 @@ private fun SawtStudio() {
                             lastFile = null
                             errorMessage = null
                             status = "جارٍ إنشاء الصوت على الهاتف…"
+                            val generationStartedAt = SystemClock.elapsedRealtime()
                             scope.launch {
                                 try {
                                     val result = engine.synthesizeToFile(
@@ -431,7 +433,8 @@ private fun SawtStudio() {
                                     lastVoiceName = selectedVoice.name
                                     lastLanguageName = if (language == "ar") "العربية" else "English"
                                     SpeechPlaybackService.playFile(context, result.absolutePath)
-                                    status = "اكتمل إنشاء الصوت وبدأ تشغيله."
+                                    val elapsedSeconds = (SystemClock.elapsedRealtime() - generationStartedAt) / 1000.0
+                                    status = "اكتمل إنشاء الصوت خلال ${String.format(Locale.US, "%.1f", elapsedSeconds)} ثانية وبدأ تشغيله."
                                 } catch (error: Exception) {
                                     errorMessage = error.message ?: "تعذر إنشاء الصوت."
                                     status = "لم يكتمل إنشاء الصوت."
