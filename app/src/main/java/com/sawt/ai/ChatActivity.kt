@@ -65,6 +65,7 @@ private fun SawtAssistantScreen(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val vault = remember { GeminiKeyVault(context) }
     var apiKey by remember { mutableStateOf(vault.read().orEmpty()) }
+    var localMode by remember { mutableStateOf(true) }
     var keyDraft by remember { mutableStateOf("") }
     var showKeyDialog by remember { mutableStateOf(false) }
     var messages by remember { mutableStateOf(listOf<ChatMessage>()) }
@@ -74,10 +75,6 @@ private fun SawtAssistantScreen(onBack: () -> Unit) {
     var speaker by remember { mutableStateOf<TextToSpeech?>(null) }
     var speakerReady by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
-
-    LaunchedEffect(Unit) {
-        if (apiKey.isBlank()) showKeyDialog = true
-    }
 
     DisposableEffect(context) {
         var instance: TextToSpeech? = null
@@ -104,7 +101,7 @@ private fun SawtAssistantScreen(onBack: () -> Unit) {
     fun sendMessage() {
         val text = draft.trim()
         if (text.isEmpty() || sending) return
-        if (apiKey.isBlank()) {
+        if (!localMode && apiKey.isBlank()) {
             keyDraft = ""
             showKeyDialog = true
             return
@@ -113,6 +110,7 @@ private fun SawtAssistantScreen(onBack: () -> Unit) {
             errorMessage = "الرسالة طويلة جدًا. أرسلها على أجزاء أقصر."
             return
         }
+        val useLocalAssistant = localMode
         val next = messages + ChatMessage(role = "user", text = text)
         messages = next
         draft = ""
@@ -120,8 +118,12 @@ private fun SawtAssistantScreen(onBack: () -> Unit) {
         errorMessage = null
         scope.launch {
             try {
-                val history = next.takeLast(12).map { ChatTurn(it.role, it.text) }
-                val answer = GeminiChatClient.reply(apiKey, history)
+                val answer = if (useLocalAssistant) {
+                    OfflineQuickAssistant.reply(text)
+                } else {
+                    val history = next.takeLast(12).map { ChatTurn(it.role, it.text) }
+                    GeminiChatClient.reply(apiKey, history)
+                }
                 messages = messages + ChatMessage(role = "assistant", text = answer)
             } catch (error: Exception) {
                 errorMessage = error.message ?: "تعذر الاتصال بالمساعد. تحقق من الإنترنت والمفتاح."
@@ -175,13 +177,17 @@ private fun SawtAssistantScreen(onBack: () -> Unit) {
                         )
                         IconButton(
                             onClick = { sendMessage() },
-                            enabled = draft.isNotBlank() && !sending && apiKey.isNotBlank(),
+                            enabled = draft.isNotBlank() && !sending,
                             modifier = Modifier.size(52.dp).background(ChatGold, RoundedCornerShape(16.dp))
                         ) {
                             Icon(Icons.Default.Send, contentDescription = "إرسال", tint = ChatBackground)
                         }
                     }
-                    Text("يعمل المساعد عبر الإنترنت. لا ترسل كلمات مرور أو بيانات خاصة.", color = ChatMuted, fontSize = 10.sp, modifier = Modifier.padding(top = 5.dp))
+                    Text(
+                        if (localMode) "الوضع المحلي: يعمل دون إنترنت للأسئلة الشائعة عن التطبيق."
+                        else "Gemini يعمل عبر الإنترنت بمفتاحك الشخصي. لا ترسل كلمات مرور أو بيانات خاصة.",
+                        color = ChatMuted, fontSize = 10.sp, modifier = Modifier.padding(top = 5.dp)
+                    )
                 }
             }
         ) { padding ->
@@ -198,7 +204,7 @@ private fun SawtAssistantScreen(onBack: () -> Unit) {
                     }
                     Column(Modifier.weight(1f)) {
                         Text("مساعد SAWT الذكي", color = ChatText, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        Text("Gemini Flash · محادثة عربية", color = ChatMuted, fontSize = 10.sp)
+                        Text(if (localMode) "مساعد محلي خفيف · دون إنترنت" else "Gemini Flash · عبر الإنترنت", color = ChatMuted, fontSize = 10.sp)
                     }
                     IconButton(onClick = {
                         if (apiKey.isNotBlank()) keyDraft = apiKey
@@ -214,6 +220,26 @@ private fun SawtAssistantScreen(onBack: () -> Unit) {
                     }
                 }
 
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    TextButton(
+                        onClick = { localMode = true },
+                        colors = ButtonDefaults.textButtonColors(contentColor = if (localMode) ChatGold else ChatMuted)
+                    ) { Text(if (localMode) "✓ محلي دون إنترنت" else "محلي دون إنترنت", fontSize = 12.sp) }
+                    TextButton(
+                        onClick = {
+                            localMode = false
+                            if (apiKey.isBlank()) {
+                                keyDraft = ""
+                                showKeyDialog = true
+                            }
+                        },
+                        colors = ButtonDefaults.textButtonColors(contentColor = if (!localMode) ChatGold else ChatMuted)
+                    ) { Text(if (!localMode) "✓ Gemini عبر الإنترنت" else "Gemini عبر الإنترنت", fontSize = 12.sp) }
+                }
+
                 if (messages.isEmpty()) {
                     Column(
                         Modifier.fillMaxWidth().weight(1f).padding(24.dp),
@@ -223,11 +249,16 @@ private fun SawtAssistantScreen(onBack: () -> Unit) {
                         Text("مرحبًا بك في مساعد SAWT AI", color = ChatGold, fontSize = 22.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                         Spacer(Modifier.height(12.dp))
                         Text(
-                            "اسأل عن أي موضوع، أرسل نصًا لشرحه أو تلخيصه أو ترجمته، وتابع الحوار برسائل متتالية.",
+                            if (localMode) "اسأل عن استخدام التطبيق، الأصوات، التنزيل، تحويل النص، أو حفظ التسجيلات. يعمل هذا الوضع دون إنترنت."
+                            else "اسأل عن أي موضوع، أو أرسل نصًا لشرحه أو تلخيصه أو ترجمته. هذا الوضع يحتاج الإنترنت ومفتاح Gemini.",
                             color = ChatMuted, fontSize = 14.sp, lineHeight = 23.sp, textAlign = TextAlign.Center
                         )
                         Spacer(Modifier.height(18.dp))
-                        Text("يحتفظ بآخر الرسائل لفهم سياق حديثك.", color = ChatMuted, fontSize = 11.sp)
+                        Text(
+                            if (localMode) "للأسئلة العامة بدّل إلى Gemini عبر الإنترنت."
+                            else "يحتفظ بآخر الرسائل لفهم سياق حديثك.",
+                            color = ChatMuted, fontSize = 11.sp
+                        )
                     }
                 } else {
                     LazyColumn(
@@ -283,7 +314,7 @@ private fun SawtAssistantScreen(onBack: () -> Unit) {
                                     Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
                                         CircularProgressIndicator(Modifier.size(16.dp), color = ChatGold, strokeWidth = 2.dp)
                                         Spacer(Modifier.width(9.dp))
-                                        Text("يفكر ويكتب الرد…", color = ChatMuted, fontSize = 12.sp)
+                                        Text(if (localMode) "يعالج السؤال المحلي…" else "يفكر ويكتب الرد…", color = ChatMuted, fontSize = 12.sp)
                                     }
                                 }
                             }
@@ -298,10 +329,10 @@ private fun SawtAssistantScreen(onBack: () -> Unit) {
         AlertDialog(
             onDismissRequest = { if (apiKey.isNotBlank()) showKeyDialog = false },
             containerColor = ChatSurface,
-            title = { Text("تفعيل المساعد الذكي", color = ChatText) },
+            title = { Text("تفعيل Gemini عبر الإنترنت", color = ChatText) },
             text = {
                 Column {
-                    Text("للتشغيل تحتاج مفتاح Gemini المجاني من Google AI Studio. انسخه والصقه هنا؛ سيُحفظ مشفّرًا على هذا الهاتف فقط.", color = ChatMuted, fontSize = 13.sp, lineHeight = 20.sp)
+                    Text("هذا الوضع للأسئلة العامة وشرح النصوص. يحتاج إنترنت ومفتاح Gemini API الخاص بك؛ سيُحفظ مشفّرًا على هذا الهاتف فقط. يمكنك استخدام الوضع المحلي دون مفتاح للأسئلة الشائعة عن التطبيق.", color = ChatMuted, fontSize = 13.sp, lineHeight = 20.sp)
                     Spacer(Modifier.height(10.dp))
                     OutlinedTextField(
                         value = keyDraft,
