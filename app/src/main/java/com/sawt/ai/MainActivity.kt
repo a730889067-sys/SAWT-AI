@@ -332,12 +332,21 @@ private fun SawtStudio() {
                         steps = 3,
                         colors = SliderDefaults.colors(thumbColor = Gold, activeTrackColor = Gold, inactiveTrackColor = SurfaceRaised)
                     )
-                    Text("الجودة", color = TextMuted, fontSize = 12.sp)
+                    Text("وضع التحويل", color = TextMuted, fontSize = 12.sp)
                     Spacer(Modifier.height(7.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(7.dp), modifier = Modifier.fillMaxWidth()) {
-                        QualityButton("سريع", 4, qualitySteps == 4, Modifier.weight(1f)) { qualitySteps = 4 }
-                        QualityButton("متوازن", 6, qualitySteps == 6, Modifier.weight(1f)) { qualitySteps = 6 }
-                        QualityButton("أعلى جودة", 8, qualitySteps == 8, Modifier.weight(1f)) { qualitySteps = 8 }
+                    Surface(
+                        color = Color(0xFF211C13),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Gold),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            "سريع وموفّر للذاكرة — مضبوط تلقائيًا ليتناسب مع الهواتف ذات RAM ‏2GB",
+                            color = Gold,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 11.dp),
+                            textAlign = TextAlign.Center
+                        )
                     }
 
                     Spacer(Modifier.height(23.dp))
