@@ -137,8 +137,7 @@ class SupertonicTtsEngine(context: Context) {
         text: String,
         language: String,
         speakerId: Int,
-        speed: Float,
-        qualitySteps: Int
+        speed: Float
     ): File = withContext(Dispatchers.IO) {
         val spokenText = text.trim()
         if (spokenText.isEmpty()) throw IOException("اكتب النص أولًا.")
@@ -160,7 +159,7 @@ class SupertonicTtsEngine(context: Context) {
             speed = speed.coerceIn(0.8f, 1.2f),
             // Supertonic quality steps increase inference work. On this app's
             // low-memory target, keep the fast preset as a hard upper bound.
-            numSteps = qualitySteps.coerceIn(4, 4),
+            numSteps = 4,
             extra = mapOf("lang" to language)
         )
         val audio = try {
