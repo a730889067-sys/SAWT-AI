@@ -360,12 +360,13 @@ private fun SawtStudio() {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(if (modelReady) "الأصوات العشرة مثبتة" else "تنزيل الأصوات مرة واحدة", color = if (modelReady) Gold else TextMain, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                 Spacer(Modifier.weight(1f))
-                                Text(if (modelReady) "جاهز" else "129 MB", color = GoldSoft, fontSize = 11.sp)
+                                Text(if (!modelReady) "129 + 66 MB" else if (engine.needsOptimization()) "66 MB" else "جاهز", color = GoldSoft, fontSize = 11.sp)
                             }
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                if (modelReady) "العربية والإنجليزية، خمسة أصوات رجالية وخمسة نسائية. بعد التثبيت يعمل التحويل دون إنترنت."
-                                else "يحتاج التنزيل إلى إنترنت ومساحة فارغة تقارب 600 ميجابايت. تُحفظ النماذج داخل التطبيق ولا تحتاج إلى حساب أو مفتاح دفع.",
+                                if (!modelReady) "تنزيل الأصوات والمحرك المحسّن يحتاج الإنترنت أول مرة. الحجم التقريبي 195 ميجابايت، مع مساحة فارغة تقارب 600 ميجابايت."
+                                else if (engine.needsOptimization()) "الأصوات مثبتة بالفعل. نزّل ملف التحسين مرة واحدة لتسريع التحويل؛ سيبقى المحرك القديم متاحًا إذا تعذّر التحديث."
+                                else "العربية والإنجليزية، خمسة أصوات رجالية وخمسة نسائية. المحرك المحسّن يعمل دون إنترنت بعد التثبيت.",
                                 color = TextMuted,
                                 fontSize = 11.sp,
                                 lineHeight = 18.sp
@@ -380,14 +381,14 @@ private fun SawtStudio() {
                                 )
                                 Spacer(Modifier.height(5.dp))
                                 Text("$modelStage · $modelProgress%", color = GoldSoft, fontSize = 10.sp)
-                            } else if (!modelReady) {
+                            } else if (!modelReady || engine.needsOptimization()) {
                                 Spacer(Modifier.height(10.dp))
                                 Button(
                                     onClick = {
                                         modelLoading = true
                                         modelProgress = 0
                                         errorMessage = null
-                                        status = "جارٍ تنزيل وتثبيت حزمة الأصوات…"
+                                        status = if (modelReady) "جارٍ تنزيل تحسين سرعة الصوت…" else "جارٍ تنزيل وتثبيت حزمة الأصوات…"
                                         scope.launch {
                                             try {
                                                 engine.downloadAndInstall(
@@ -415,7 +416,7 @@ private fun SawtStudio() {
                                 ) {
                                     Icon(Icons.Default.Download, contentDescription = null)
                                     Spacer(Modifier.width(7.dp))
-                                    Text("تنزيل وتجهيز الأصوات كلها")
+                                    Text(if (modelReady) "تحسين سرعة التحويل (66 MB)" else "تنزيل وتجهيز الأصوات كلها")
                                 }
                             } else {
                                 Spacer(Modifier.height(5.dp))
