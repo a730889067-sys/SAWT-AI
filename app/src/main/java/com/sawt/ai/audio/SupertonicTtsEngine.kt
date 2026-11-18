@@ -80,7 +80,7 @@ class SupertonicTtsEngine(context: Context) {
 
             onStage("تم فك الضغط. جارٍ اختبار إنشاء محرك الصوت قبل اعتماد الحزمة…")
             val validationEngine = try {
-                createNativeEngine()
+                createNativeEngine(extractedModelDirectory)
             } catch (error: OutOfMemoryError) {
                 throw IOException("الهاتف لا يملك ذاكرة كافية لتهيئة محرك الصوت. أغلق التطبيقات الأخرى وأعد المحاولة.", error)
             } catch (error: Exception) {
@@ -166,9 +166,9 @@ class SupertonicTtsEngine(context: Context) {
         nativeTts = null
     }
 
-    private fun createNativeEngine(): OfflineTts {
+    private fun createNativeEngine(directory: File = modelDirectory): OfflineTts {
         val config = getOfflineTtsConfig(
-            modelDir = modelDirectory.absolutePath,
+            modelDir = directory.absolutePath,
             isSupertonic = true,
             durationPredictor = "duration_predictor.int8.onnx",
             textEncoder = "text_encoder.int8.onnx",
