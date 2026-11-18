@@ -109,7 +109,12 @@ class SupertonicTtsEngine(context: Context) {
         if (speakerId !in 0..9) throw IOException("اختيار الصوت غير صالح.")
         if (!isModelInstalled()) throw IOException("نزّل حزمة الأصوات أولًا.")
 
-        val engine = nativeTts ?: createNativeEngine().also { nativeTts = it }
+        val engine = nativeTts ?: try {
+            createNativeEngine().also { nativeTts = it }
+        } catch (error: OutOfMemoryError) {
+            close()
+            throw IOException("ذاكرة الهاتف غير كافية لتحميل محرك الصوت. أغلق التطبيقات الأخرى وأعد المحاولة.", error)
+        }
         val config = GenerationConfig(
             sid = speakerId,
             speed = speed.coerceIn(0.8f, 1.2f),
@@ -265,7 +270,7 @@ class SupertonicTtsEngine(context: Context) {
             "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/$MODEL_DIRECTORY.tar.bz2"
         const val ARCHIVE_SHA256 = "82fa96f91c4ef8abaae3a14a3f4153facf88bed821d1f7331cec2700f432c427"
         const val ARCHIVE_SIZE_BYTES = 128_774_318L
-        const val MINIMUM_FREE_SPACE_BYTES = 380L * 1024L * 1024L
+        const val MINIMUM_FREE_SPACE_BYTES = 600L * 1024L * 1024L
         const val MAX_SINGLE_FILE_BYTES = 350L * 1024L * 1024L
         const val MAX_TOTAL_EXTRACTED_BYTES = 500L * 1024L * 1024L
 
