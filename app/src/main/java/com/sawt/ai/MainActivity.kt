@@ -410,7 +410,7 @@ private fun SawtStudio() {
                                             }
                                         }
                                     },
-                                    enabled = !modelLoading,
+                                    enabled = !modelLoading && !generating && !previewing,
                                     modifier = Modifier.fillMaxWidth().height(48.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = Background)
                                 ) {
