@@ -78,6 +78,19 @@ class SupertonicTtsEngine(context: Context) {
                 throw IOException("ملفات النموذج غير مكتملة (${missing.first}). أُوقف التثبيت لحماية التطبيق.")
             }
 
+            onStage("تم فك الضغط. جارٍ اختبار إنشاء محرك الصوت قبل اعتماد الحزمة…")
+            val validationEngine = try {
+                createNativeEngine()
+            } catch (error: OutOfMemoryError) {
+                throw IOException("الهاتف لا يملك ذاكرة كافية لتهيئة محرك الصوت. أغلق التطبيقات الأخرى وأعد المحاولة.", error)
+            } catch (error: Exception) {
+                throw IOException("تعذر تهيئة محرك الصوت على هذا الهاتف: ${error.message ?: "خطأ غير معروف"}", error)
+            }
+            try {
+                validationEngine.release()
+            } catch (_: Exception) {
+            }
+
             File(extractedModelDirectory, ".sawt-verified").writeText(ARCHIVE_SHA256)
             modelDirectory.deleteRecursively()
             if (!extractedModelDirectory.renameTo(modelDirectory)) {
