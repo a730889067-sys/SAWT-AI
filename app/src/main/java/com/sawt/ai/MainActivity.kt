@@ -5,14 +5,12 @@ import android.content.Context
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
-import android.webkit.WebResourceRequest
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import android.content.Intent
-import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -25,12 +23,12 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -41,17 +39,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.webkit.WebViewAssetLoader
-import com.sawt.ai.audio.CloudVoiceClient
-import com.sawt.ai.audio.CloudVoiceOption
-import com.sawt.ai.audio.NabraBridgeEvent
-import com.sawt.ai.audio.NabraLocalBridge
 import com.sawt.ai.audio.SpeechPlaybackService
+import com.sawt.ai.audio.SupertonicTtsEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.Locale
 
 private val Background = Color(0xFF070707)
 private val SurfaceDark = Color(0xFF121212)
@@ -61,7 +55,28 @@ private val GoldSoft = Color(0xFFB99A5C)
 private val TextMain = Color(0xFFF5F1E8)
 private val TextMuted = Color(0xFF9B978E)
 private val Border = Color(0xFF302B22)
-private const val MAX_TEXT_BYTES = 5_000
+private const val MAX_TEXT_CHARS = 2_000
+
+private data class VoiceStyle(
+    val name: String,
+    val speakerId: Int,
+    val description: String
+)
+
+private val maleVoices = listOf(
+    VoiceStyle("M1", 5, "رجالي 1"),
+    VoiceStyle("M2", 6, "رجالي 2"),
+    VoiceStyle("M3", 7, "رجالي 3"),
+    VoiceStyle("M4", 8, "رجالي 4"),
+    VoiceStyle("M5", 9, "رجالي 5")
+)
+private val femaleVoices = listOf(
+    VoiceStyle("F1", 0, "نسائي 1"),
+    VoiceStyle("F2", 1, "نسائي 2"),
+    VoiceStyle("F3", 2, "نسائي 3"),
+    VoiceStyle("F4", 3, "نسائي 4"),
+    VoiceStyle("F5", 4, "نسائي 5")
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -74,96 +89,29 @@ class MainActivity : ComponentActivity() {
 private fun SawtStudio() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val apiBase = BuildConfig.SAWT_API_BASE_URL.trim()
-    val client = remember(apiBase) { apiBase.takeIf { it.isNotBlank() }?.let(::CloudVoiceClient) }
+    val engine = remember(context) { SupertonicTtsEngine(context) }
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
     var input by remember { mutableStateOf("") }
-    var voices by remember { mutableStateOf<List<CloudVoiceOption>>(emptyList()) }
-    var selectedVoice by remember { mutableStateOf<CloudVoiceOption?>(null) }
-    var loading by remember { mutableStateOf(false) }
+    var language by remember { mutableStateOf("ar") }
+    var selectedVoice by remember { mutableStateOf(maleVoices.first()) }
+    var speed by remember { mutableFloatStateOf(1.0f) }
+    var qualitySteps by remember { mutableIntStateOf(8) }
+    var modelReady by remember { mutableStateOf(engine.isModelInstalled()) }
+    var modelLoading by remember { mutableStateOf(false) }
+    var modelProgress by remember { mutableIntStateOf(0) }
+    var modelStage by remember { mutableStateOf("الأصوات غير مثبتة بعد") }
     var generating by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
     var lastFile by remember { mutableStateOf<File?>(null) }
-    var status by remember { mutableStateOf("مساحة هادئة لتحويل النص إلى صوت") }
+    var status by remember { mutableStateOf("اكتب نصك، اختر الصوت، ثم أنشئ التسجيل.") }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
     var showHelp by remember { mutableStateOf(false) }
-    var localPageReady by remember { mutableStateOf(false) }
-    var localEngineReady by remember { mutableStateOf(false) }
-    var localLoading by remember { mutableStateOf(false) }
-    var localProgress by remember { mutableStateOf("") }
-    var localError by remember { mutableStateOf<String?>(null) }
-    var webViewRef by remember { mutableStateOf<WebView?>(null) }
-    val localBridge: NabraLocalBridge = remember(context) {
-        NabraLocalBridge(context) { event ->
-            when (event) {
-                NabraBridgeEvent.PageReady -> {
-                    localPageReady = true
-                    if (!localEngineReady) status = "محرك الصوت المحلي جاهز للتجهيز."
-                }
-                is NabraBridgeEvent.Progress -> {
-                    val percent = if (event.total > 0) (event.loaded * 100 / event.total).toInt().coerceIn(0, 100) else 0
-                    localProgress = if (event.total > 0) "${event.name}: $percent%" else "جارٍ تجهيز ${event.name}…"
-                }
-                is NabraBridgeEvent.EngineReady -> {
-                    localEngineReady = true
-                    localLoading = false
-                    localError = null
-                    status = "الصوت النسائي المحلي جاهز. يمكنك التحويل دون إنترنت بعد اكتمال التنزيل."
-                }
-                is NabraBridgeEvent.AudioReady -> {
-                    lastFile = event.file
-                    generating = false
-                    SpeechPlaybackService.playFile(context, event.file.absolutePath)
-                    status = "اكتمل إنشاء الصوت المحلي وبدأ التشغيل."
-                }
-                is NabraBridgeEvent.Error -> {
-                    localLoading = false
-                    generating = false
-                    localError = event.message
-                    status = event.message
-                }
-                NabraBridgeEvent.ModelsRemoved -> {
-                    localEngineReady = false
-                    localLoading = false
-                    localProgress = ""
-                    status = "تم حذف ملفات الصوت المحلية. يلزم تنزيلها مجددًا للاستخدام دون إنترنت."
-                }
-            }
-        }
-    }
+    var showDeleteConfirmation by remember { mutableStateOf(false) }
 
-    DisposableEffect(localBridge) {
-        onDispose {
-            localBridge.close()
-            webViewRef?.let { web ->
-                try {
-                    web.removeJavascriptInterface("SAWTBridge")
-                    web.stopLoading()
-                    web.loadUrl("about:blank")
-                    web.destroy()
-                } catch (_: Exception) {
-                }
-            }
-        }
+    DisposableEffect(engine) {
+        onDispose { engine.close() }
     }
-
-    LaunchedEffect(client) {
-        if (client == null) {
-            status = "يمكنك تنزيل الصوت النسائي المحلي؛ خدمة الأصوات السحابية غير مفعّلة."
-        } else {
-            loading = true
-            try {
-                voices = withContext(Dispatchers.IO) { client.fetchVoices() }
-                selectedVoice = voices.firstOrNull()
-                status = if (voices.isEmpty()) "لم يعثر الخادم على أصوات عربية فصحى." else "اختر الصوت واكتب نصك."
-            } catch (e: Exception) {
-                status = e.message ?: "تعذر الاتصال بمكتبة الأصوات."
-            } finally {
-                loading = false
-            }
-        }
-    }
-
-    val male = voices.firstOrNull { it.gender.equals("MALE", true) }
-    val female = voices.firstOrNull { it.gender.equals("FEMALE", true) }
 
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         MaterialTheme(
@@ -183,36 +131,8 @@ private fun SawtStudio() {
                         .background(Brush.verticalGradient(listOf(Color(0xFF17130D), Background, Background)))
                         .padding(insets)
                         .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 22.dp)
+                        .padding(horizontal = 20.dp)
                 ) {
-                    AndroidView(
-                        factory = { viewContext ->
-                            val assetLoader = WebViewAssetLoader.Builder()
-                                .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(viewContext))
-                                .build()
-                            WebView(viewContext).apply {
-                                settings.javaScriptEnabled = true
-                                settings.domStorageEnabled = true
-                                settings.allowFileAccess = false
-                                settings.allowContentAccess = false
-                                settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                                settings.javaScriptCanOpenWindowsAutomatically = false
-                                settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
-                                //noinspection JavascriptInterface
-                                addJavascriptInterface(localBridge, "SAWTBridge") // Bridge class explicitly annotates every JavaScript entry point.
-                                webViewClient = object : WebViewClient() {
-                                    override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?) =
-                                        request?.url?.let(assetLoader::shouldInterceptRequest)
-
-                                    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean =
-                                        request?.url?.host != "appassets.androidplatform.net"
-                                }
-                                webViewRef = this
-                                loadUrl("https://appassets.androidplatform.net/assets/voice_engine/index.html")
-                            }
-                        },
-                        modifier = Modifier.size(1.dp).alpha(0f)
-                    )
                     Spacer(Modifier.height(22.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -230,57 +150,46 @@ private fun SawtStudio() {
                         Spacer(Modifier.width(13.dp))
                         Column(Modifier.weight(1f)) {
                             Text("SAWT AI", color = TextMain, fontSize = 21.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
-                            Text("استوديو الصوت العربي", color = TextMuted, fontSize = 11.sp)
+                            Text("استوديو تحويل النص إلى صوت", color = TextMuted, fontSize = 11.sp)
                         }
-                        IconButton(
-                            onClick = { showHelp = true },
-                            modifier = Modifier.size(38.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.HelpOutline,
-                                contentDescription = "طريقة الاستخدام",
-                                tint = Gold,
-                                modifier = Modifier.size(21.dp)
-                            )
-                        }
-                        Surface(color = Color(0xFF211C13), shape = CircleShape) {
-                            Text("صوت عربي", color = Gold, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp))
+                        IconButton(onClick = { showHelp = true }, modifier = Modifier.size(42.dp)) {
+                            Icon(Icons.Default.HelpOutline, contentDescription = "شرح الاستخدام", tint = Gold, modifier = Modifier.size(23.dp))
                         }
                     }
 
-                    Spacer(Modifier.height(34.dp))
+                    Spacer(Modifier.height(30.dp))
                     Text("صوتٌ يليق بكلماتك", color = TextMain, fontSize = 27.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(7.dp))
-                    Text("حوّل النصوص إلى قراءة عربية واضحة وأنيقة", color = TextMuted, fontSize = 13.sp)
+                    Text("أصوات عربية وإنجليزية تعمل على هاتفك", color = TextMuted, fontSize = 13.sp)
 
                     Spacer(Modifier.height(25.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("النص", color = TextMain, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text("١. اكتب النص", color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.weight(1f))
-                        Text("${input.length} حرف · ${input.toByteArray(Charsets.UTF_8).size} / $MAX_TEXT_BYTES بايت", color = TextMuted, fontSize = 10.sp)
+                        Text("${input.length} / $MAX_TEXT_CHARS حرف", color = TextMuted, fontSize = 10.sp)
                     }
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(9.dp))
                     Surface(
                         color = SurfaceDark,
-                        shape = RoundedCornerShape(22.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+                        shape = RoundedCornerShape(21.dp),
+                        border = BorderStroke(1.dp, Border),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         OutlinedTextField(
                             value = input,
-                            onValueChange = { nextValue ->
-                                val byteCount = nextValue.toByteArray(Charsets.UTF_8).size
-                                if (nextValue.length <= 5000 && byteCount <= MAX_TEXT_BYTES) {
-                                    input = nextValue
+                            onValueChange = { next ->
+                                if (next.length <= MAX_TEXT_CHARS && next.toByteArray(Charsets.UTF_8).size <= 5000) {
+                                    input = next
                                     lastFile = null
+                                    errorMessage = null
                                 } else {
-                                    status = "الحد الأقصى للنص في الطلب الواحد 5000 بايت."
+                                    status = "قسّم النص إلى فقرات أقصر، حتى 2000 حرف في المرة."
                                 }
                             },
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 205.dp),
-                            placeholder = { Text("اكتب أو الصق النص هنا…", color = TextMuted) },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 175.dp),
+                            placeholder = { Text("اكتب هنا أو الصق النص الذي تريد تحويله إلى صوت…", color = TextMuted, lineHeight = 24.sp) },
                             textStyle = LocalTextStyle.current.copy(color = TextMain, fontSize = 16.sp, lineHeight = 28.sp),
-                            shape = RoundedCornerShape(22.dp),
+                            shape = RoundedCornerShape(21.dp),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = Color.Transparent,
                                 unfocusedBorderColor = Color.Transparent,
@@ -290,126 +199,200 @@ private fun SawtStudio() {
                             )
                         )
                     }
-
-                    Spacer(Modifier.height(25.dp))
-                    Text("اختر صوتك", color = TextMain, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(11.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(11.dp), modifier = Modifier.fillMaxWidth()) {
-                        VoiceCard(
-                            title = "رجالي عميق",
-                            subtitle = "قراءة هادئة ورزينة",
-                            selected = selectedVoice?.id == male?.id,
-                            enabled = male != null,
-                            modifier = Modifier.weight(1f)
-                        ) { male?.let { selectedVoice = it } }
-                        VoiceCard(
-                            title = "نسائي واضح",
-                            subtitle = "قراءة ناعمة وواثقة",
-                            selected = selectedVoice?.id == female?.id,
-                            enabled = female != null,
-                            modifier = Modifier.weight(1f)
-                        ) { female?.let { selectedVoice = it } }
-                    }
-
-                    Spacer(Modifier.height(22.dp))
-                    Text("الصوت المحلي دون إنترنت", color = TextMain, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(9.dp))
-                    OutlinedButton(
-                        onClick = {
-                            val demo = Intent(Intent.ACTION_VIEW, Uri.parse("https://huggingface.co/spaces/NightPrince/Fasih-TTS"))
-                            context.startActivity(demo)
-                        },
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Gold),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, GoldSoft)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("تجربة الصوت الرجالي الفصيح عبر الإنترنت")
+                        TextButton(onClick = {
+                            input = if (language == "ar") {
+                                "مرحبًا بك في تطبيق ساوت إيه آي. اكتب ما تريد، واختر الصوت الذي يعجبك، ثم استمع إلى النتيجة."
+                            } else {
+                                "Welcome to SAWT AI. Type your text, choose a voice, and listen to the result."
+                            }
+                            lastFile = null
+                        }) { Text("نص تجريبي", color = GoldSoft) }
+                        TextButton(onClick = { input = ""; lastFile = null }) { Text("مسح النص", color = TextMuted) }
                     }
-                    Text("الصوت الرجالي يفتح تجربة فصيحة خارجية ويحتاج إنترنت؛ لا يُنزّل داخل التطبيق.", color = TextMuted, fontSize = 10.sp, lineHeight = 16.sp)
-                    Spacer(Modifier.height(6.dp))
-                    Text("صوت نسائي عربي فصيح. نزّل المحرك مرة واحدة، ثم استخدمه دون اتصال بالشبكة.", color = TextMuted, fontSize = 11.sp, lineHeight = 18.sp)
-                    Spacer(Modifier.height(10.dp))
-                    if (!localEngineReady) {
-                        Button(
-                            onClick = {
-                                localLoading = true
-                                localError = null
-                                localProgress = "بدء تنزيل محرك الصوت…"
-                                webViewRef?.evaluateJavascript("window.sawtTts?.load()", null)
-                            },
-                            enabled = localPageReady && !localLoading,
-                            modifier = Modifier.fillMaxWidth().height(48.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = SurfaceRaised, contentColor = Gold)
-                        ) { Text(if (localLoading) "جارٍ تجهيز الصوت المحلي…" else "تنزيل وتجهيز الصوت المحلي") }
-                    } else {
-                        Button(
-                            onClick = {
-                                if (input.isNotBlank()) {
-                                    generating = true
-                                    lastFile = null
-                                    status = "جارٍ إنشاء الصوت محليًا…"
-                                    val safeText = org.json.JSONObject.quote(input.trim())
-                                    webViewRef?.evaluateJavascript("window.sawtTts.generate($safeText, 1.0).catch(function(){})", null)
-                                }
-                            },
-                            enabled = !generating && input.isNotBlank(),
-                            modifier = Modifier.fillMaxWidth().height(48.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = Background)
-                        ) { Text(if (generating) "جارٍ التحويل دون إنترنت…" else "تحويل النص محليًا دون إنترنت") }
-                        TextButton(onClick = { webViewRef?.evaluateJavascript("window.sawtTts.removeDownloadedModels()", null) }) {
-                            Text("حذف ملفات الصوت المحلية", color = TextMuted)
+
+                    Spacer(Modifier.height(17.dp))
+                    Text("٢. اختر لغة النص", color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(9.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        LanguageButton("العربية", language == "ar", Modifier.weight(1f)) {
+                            language = "ar"
+                            input = ""
+                            lastFile = null
+                        }
+                        LanguageButton("English", language == "en", Modifier.weight(1f)) {
+                            language = "en"
+                            input = ""
+                            lastFile = null
                         }
                     }
-                    if (localLoading || localProgress.isNotBlank()) {
-                        Text(localProgress, color = GoldSoft, fontSize = 11.sp)
-                        if (localLoading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Gold, trackColor = SurfaceRaised)
-                    }
-                    if (localError != null) Text(localError.orEmpty(), color = Color(0xFFE0A0A0), fontSize = 11.sp)
 
-                    if (loading) {
-                        Spacer(Modifier.height(14.dp))
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Gold, trackColor = SurfaceRaised)
+                    Spacer(Modifier.height(20.dp))
+                    Text("٣. اختر الصوت الذي تريده", color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(7.dp))
+                    Text("نفس الأصوات العشرة متاحة للعربية والإنجليزية.", color = TextMuted, fontSize = 11.sp)
+                    Spacer(Modifier.height(11.dp))
+                    Text("أصوات رجالية", color = GoldSoft, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(7.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                        maleVoices.forEach { voice ->
+                            VoiceChoice(voice, selectedVoice.name == voice.name, Modifier.weight(1f)) {
+                                selectedVoice = voice
+                            }
+                        }
                     }
-                    if (client == null || voices.isEmpty()) {
-                        Spacer(Modifier.height(14.dp))
-                        Surface(color = Color(0xFF211C13), shape = RoundedCornerShape(15.dp), modifier = Modifier.fillMaxWidth()) {
+                    Spacer(Modifier.height(12.dp))
+                    Text("أصوات نسائية", color = GoldSoft, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(7.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                        femaleVoices.forEach { voice ->
+                            VoiceChoice(voice, selectedVoice.name == voice.name, Modifier.weight(1f)) {
+                                selectedVoice = voice
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(19.dp))
+                    Text("٤. اضبط سرعة القراءة والجودة", color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("سرعة الصوت", color = TextMuted, fontSize = 12.sp)
+                        Spacer(Modifier.weight(1f))
+                        Text(String.format(Locale.US, "%.1f×", speed), color = Gold, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Slider(
+                        value = speed,
+                        onValueChange = { speed = it },
+                        valueRange = 0.8f..1.2f,
+                        steps = 3,
+                        colors = SliderDefaults.colors(thumbColor = Gold, activeTrackColor = Gold, inactiveTrackColor = SurfaceRaised)
+                    )
+                    Text("الجودة", color = TextMuted, fontSize = 12.sp)
+                    Spacer(Modifier.height(7.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(7.dp), modifier = Modifier.fillMaxWidth()) {
+                        QualityButton("سريع", 5, qualitySteps == 5, Modifier.weight(1f)) { qualitySteps = 5 }
+                        QualityButton("متوازن", 8, qualitySteps == 8, Modifier.weight(1f)) { qualitySteps = 8 }
+                        QualityButton("أعلى جودة", 12, qualitySteps == 12, Modifier.weight(1f)) { qualitySteps = 12 }
+                    }
+
+                    Spacer(Modifier.height(23.dp))
+                    Text("٥. حزمة الأصوات", color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(8.dp))
+                    Surface(
+                        color = SurfaceDark,
+                        shape = RoundedCornerShape(18.dp),
+                        border = BorderStroke(1.dp, if (modelReady) Color(0xFF75613D) else Border),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(Modifier.padding(14.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(if (modelReady) "الأصوات العشرة مثبتة" else "تنزيل الأصوات مرة واحدة", color = if (modelReady) Gold else TextMain, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                Spacer(Modifier.weight(1f))
+                                Text(if (modelReady) "جاهز" else "129 MB", color = GoldSoft, fontSize = 11.sp)
+                            }
+                            Spacer(Modifier.height(6.dp))
                             Text(
-                                if (client == null) "الخادم السحابي غير مضبوط. الصوت النسائي المحلي متاح في القسم أعلاه، ولا نعرض صوتًا رجاليًا دون محرك فصيح معتمد."
-                                else "لم يتم تحميل أصوات الفصحى من الخادم. تحقق من إعداد مكتبة الصوت.",
-                                color = Color(0xFFE0C995), fontSize = 12.sp, lineHeight = 19.sp,
-                                modifier = Modifier.padding(14.dp)
+                                if (modelReady) "العربية والإنجليزية، خمسة أصوات رجالية وخمسة نسائية. بعد التثبيت يعمل التحويل دون إنترنت."
+                                else "يحتاج التنزيل إلى إنترنت ومساحة فارغة تقارب 380 ميجابايت. تُحفظ النماذج داخل التطبيق ولا تحتاج إلى حساب أو مفتاح دفع.",
+                                color = TextMuted,
+                                fontSize = 11.sp,
+                                lineHeight = 18.sp
                             )
+                            if (modelLoading) {
+                                Spacer(Modifier.height(12.dp))
+                                LinearProgressIndicator(
+                                    progress = modelProgress / 100f,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = Gold,
+                                    trackColor = SurfaceRaised
+                                )
+                                Spacer(Modifier.height(5.dp))
+                                Text("$modelStage · $modelProgress%", color = GoldSoft, fontSize = 10.sp)
+                            } else if (!modelReady) {
+                                Spacer(Modifier.height(10.dp))
+                                Button(
+                                    onClick = {
+                                        modelLoading = true
+                                        modelProgress = 0
+                                        errorMessage = null
+                                        status = "جارٍ تنزيل وتثبيت حزمة الأصوات…"
+                                        scope.launch {
+                                            try {
+                                                engine.downloadAndInstall(
+                                                    onProgress = { loaded, total ->
+                                                        val percent = if (total > 0L) ((loaded * 100L) / total).toInt().coerceIn(0, 100) else 0
+                                                        mainHandler.post { modelProgress = percent }
+                                                    },
+                                                    onStage = { stage ->
+                                                        mainHandler.post { modelStage = stage }
+                                                    }
+                                                )
+                                                modelReady = engine.isModelInstalled()
+                                                status = "اكتمل تثبيت الأصوات. يمكنك الآن التحويل دون إنترنت."
+                                            } catch (error: Exception) {
+                                                errorMessage = error.message ?: "تعذر تنزيل الأصوات أو تثبيتها."
+                                                status = "لم يكتمل تثبيت الأصوات."
+                                            } finally {
+                                                modelLoading = false
+                                            }
+                                        }
+                                    },
+                                    enabled = !modelLoading,
+                                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = Background)
+                                ) {
+                                    Icon(Icons.Default.Download, contentDescription = null)
+                                    Spacer(Modifier.width(7.dp))
+                                    Text("تنزيل وتجهيز الأصوات كلها")
+                                }
+                            } else {
+                                Spacer(Modifier.height(5.dp))
+                                TextButton(onClick = { showDeleteConfirmation = true }) {
+                                    Text("حذف حزمة الأصوات من الهاتف", color = TextMuted, fontSize = 11.sp)
+                                }
+                            }
                         }
                     }
 
-                    Spacer(Modifier.height(22.dp))
+                    if (errorMessage != null) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(errorMessage.orEmpty(), color = Color(0xFFE4A3A3), fontSize = 12.sp, lineHeight = 19.sp)
+                    }
+
+                    Spacer(Modifier.height(20.dp))
                     Button(
                         onClick = {
-                            val activeClient = client
-                            val activeVoice = selectedVoice
-                            if (activeClient == null || activeVoice == null || input.isBlank()) return@Button
+                            if (!modelReady || input.isBlank()) return@Button
                             generating = true
+                            saving = false
                             lastFile = null
-                            status = "جارٍ تجهيز الصوت…"
-                            val spokenText = input.trim()
+                            errorMessage = null
+                            status = "جارٍ إنشاء الصوت على الهاتف…"
                             scope.launch {
                                 try {
-                                    val output = withContext(Dispatchers.IO) {
-                                        File(context.cacheDir, "sawt-${System.currentTimeMillis()}.mp3").also {
-                                            activeClient.synthesizeToFile(spokenText, activeVoice.id, 1f, 1f, it)
-                                        }
-                                    }
-                                    lastFile = output
-                                    SpeechPlaybackService.playFile(context, output.absolutePath)
-                                    status = "اكتمل الصوت وبدأ التشغيل."
-                                } catch (e: Exception) {
-                                    status = e.message ?: "تعذر إنشاء الصوت."
+                                    val result = engine.synthesizeToFile(
+                                        text = input.trim(),
+                                        language = language,
+                                        speakerId = selectedVoice.speakerId,
+                                        speed = speed,
+                                        qualitySteps = qualitySteps
+                                    )
+                                    lastFile = result
+                                    SpeechPlaybackService.playFile(context, result.absolutePath)
+                                    status = "اكتمل إنشاء الصوت وبدأ تشغيله."
+                                } catch (error: Exception) {
+                                    errorMessage = error.message ?: "تعذر إنشاء الصوت."
+                                    status = "لم يكتمل إنشاء الصوت."
                                 } finally {
                                     generating = false
                                 }
                             }
                         },
-                        enabled = !generating && client != null && selectedVoice != null && input.isNotBlank(),
+                        enabled = modelReady && !modelLoading && !generating && input.isNotBlank(),
                         modifier = Modifier.fillMaxWidth().height(58.dp),
                         shape = RoundedCornerShape(18.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -419,70 +402,110 @@ private fun SawtStudio() {
                             disabledContentColor = TextMuted
                         )
                     ) {
-                        if (generating) CircularProgressIndicator(Modifier.size(21.dp), color = Background, strokeWidth = 2.dp)
-                        else Icon(Icons.Default.PlayArrow, contentDescription = null)
+                        if (generating) {
+                            CircularProgressIndicator(Modifier.size(21.dp), color = Background, strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null)
+                        }
                         Spacer(Modifier.width(9.dp))
-                        Text(if (generating) "جارٍ إنشاء الصوت" else "إنشاء الصوت والاستماع", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        Text(if (generating) "جارٍ إنشاء الصوت…" else "إنشاء الصوت والاستماع", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     }
 
                     if (lastFile != null) {
                         Spacer(Modifier.height(11.dp))
                         OutlinedButton(
                             onClick = {
-                                val file = lastFile ?: return@OutlinedButton
+                                lastFile?.let { SpeechPlaybackService.playFile(context, it.absolutePath) }
+                            },
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Gold),
+                            border = BorderStroke(1.dp, GoldSoft)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null)
+                            Spacer(Modifier.width(7.dp))
+                            Text("إعادة الاستماع")
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Button(
+                            onClick = {
+                                val file = lastFile ?: return@Button
+                                saving = true
                                 scope.launch {
                                     try {
                                         val name = withContext(Dispatchers.IO) { saveAudioToDownloads(context, file) }
-                                        status = if (Build.VERSION.SDK_INT >= 29) "تم حفظ $name في مجلد التنزيلات." else "تم حفظ $name في مجلد ملفات SAWT AI الخاص بالتطبيق."
-                                    } catch (_: Exception) {
-                                        status = "تعذر حفظ الملف. حاول مرة أخرى."
+                                        status = "تم حفظ $name داخل التنزيلات / SAWT AI."
+                                    } catch (error: Exception) {
+                                        errorMessage = error.message ?: "تعذر حفظ ملف الصوت."
+                                    } finally {
+                                        saving = false
                                     }
                                 }
                             },
+                            enabled = !saving,
                             modifier = Modifier.fillMaxWidth().height(52.dp),
-                            shape = RoundedCornerShape(17.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Gold),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, GoldSoft)
+                            colors = ButtonDefaults.buttonColors(containerColor = SurfaceRaised, contentColor = Gold)
                         ) {
                             Icon(Icons.Default.Download, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text(if (lastFile?.extension.equals("wav", true) == true) "حفظ ملف WAV" else "حفظ ملف MP3")
+                            Spacer(Modifier.width(7.dp))
+                            Text(if (saving) "جارٍ حفظ الملف…" else "حفظ الصوت على الهاتف (WAV)")
                         }
                     }
 
-                    Spacer(Modifier.height(17.dp))
+                    Spacer(Modifier.height(15.dp))
                     Text(status, color = TextMuted, fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
-                    Spacer(Modifier.height(28.dp))
-                    Text("SAWT AI  •  ARABIC VOICE STUDIO", color = Color(0xFF625A4B), fontSize = 9.sp, letterSpacing = 1.2.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                    Spacer(Modifier.height(24.dp))
+                    Text("SAWT AI  •  OFFLINE VOICE STUDIO", color = Color(0xFF625A4B), fontSize = 9.sp, letterSpacing = 1.2.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                     Spacer(Modifier.height(18.dp))
                 }
             }
+
             if (showHelp) {
                 AlertDialog(
                     onDismissRequest = { showHelp = false },
                     containerColor = SurfaceDark,
                     title = {
-                        Text(
-                            "طريقة استخدام SAWT AI",
-                            color = Gold,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Text("شرح SAWT AI بالتفصيل", color = Gold, fontWeight = FontWeight.Bold)
                     },
                     text = {
-                        Text(
-                            "١. اكتب النص أو الصقه في المربع.\n\n" +
-                                "٢. اضغط «تنزيل وتجهيز الصوت المحلي» مرة واحدة مع اتصال بالإنترنت.\n\n" +
-                                "٣. بعد اكتمال التنزيل، استخدم «تحويل النص محليًا دون إنترنت» للصوت النسائي الفصيح.\n\n" +
-                                "٤. احفظ الناتج بصيغة WAV. الصوت الرجالي غير متاح محليًا حتى نعتمد نموذجًا فصيحًا مرخّصًا ومختبرًا.\n\n" +
-                                "يمكن حذف ملفات النموذج من زر الحذف. الخدمة السحابية خيار منفصل وتحتاج خادمًا وفوترة.",
-                            color = TextMain,
-                            lineHeight = 23.sp
-                        )
+                        Column(
+                            modifier = Modifier
+                                .heightIn(max = 470.dp)
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            HelpSection("١. تنزيل الأصوات أول مرة", "اضغط «تنزيل وتجهيز الأصوات كلها» والهاتف متصل بالإنترنت. حجم الحزمة يقارب 129 ميجابايت، ويطلب التطبيق مساحة فارغة تقارب 380 ميجابايت حتى يستطيع تنزيل الملفات وفك ضغطها بأمان. انتظر حتى تظهر عبارة «الأصوات العشرة مثبتة». لا تحتاج إلى حساب أو اشتراك أو بطاقة دفع.")
+                            HelpSection("٢. كتابة النص", "المربع الكبير هو مكان الكتابة. اضغط داخله واكتب من لوحة المفاتيح، أو انسخ نصًا من أي مكان ثم اضغط مطولًا داخل المربع واختر «لصق». يمكنك استخدام علامات الترقيم والفواصل وتقسيم النص إلى فقرات. الحد الأقصى 2000 حرف في العملية الواحدة. للأسماء غير الشائعة، أضف التشكيل يدويًا عند الحاجة لتوضيح النطق.")
+                            HelpSection("٣. اختيار اللغة", "اختر «العربية» عندما يكون النص عربيًا، واختر English عندما يكون النص إنجليزيًا. الأفضل أن يكون النص بلغة واحدة في كل عملية حتى تكون القراءة أوضح.")
+                            HelpSection("٤. اختيار الصوت", "ستجد خمسة أصوات رجالية M1 إلى M5، وخمسة أصوات نسائية F1 إلى F5. اضغط على بطاقة الصوت الذي تريد سماعه. يمكنك تغيير الصوت في أي وقت، وجميعها متاحة للغتين العربية والإنجليزية.")
+                            HelpSection("٥. السرعة والجودة", "حرّك شريط السرعة من 0.8× إلى 1.2×. اختر «سريع» لإنشاء أسرع، أو «متوازن» وهو الاختيار الافتراضي، أو «أعلى جودة» وقد يستغرق وقتًا أطول قليلًا.")
+                            HelpSection("٦. إنشاء الصوت والاستماع", "بعد كتابة النص واختيار اللغة والصوت، اضغط «إنشاء الصوت والاستماع». سيُنشئ التطبيق ملف WAV على الهاتف ويبدأ تشغيله تلقائيًا. اضغط «إعادة الاستماع» لسماع الملف مرة أخرى.")
+                            HelpSection("٧. حفظ الصوت وإيجاده", "اضغط «حفظ الصوت على الهاتف (WAV)». سيظهر الملف في تطبيق الملفات داخل: التنزيلات (Download) ثم مجلد SAWT AI. يمكنك فتحه أو مشاركته من هناك.")
+                            HelpSection("٨. العمل دون إنترنت والخصوصية", "الإنترنت مطلوب لتنزيل حزمة النماذج أول مرة فقط. بعد اكتمال التثبيت يعمل إنشاء الصوت محليًا على الهاتف دون اتصال، ولا يحتاج إلى خادم مدفوع. لا يرسل التطبيق النص إلى خدمة سحابية أثناء التحويل المحلي.")
+                            HelpSection("٩. عند فشل التنزيل", "تأكد من اتصال الإنترنت ومن وجود مساحة فارغة كافية، ثم اضغط زر التنزيل مرة أخرى. إذا انقطع الاتصال أثناء التنزيل فسيبدأ التنزيل من جديد. لا تحذف بيانات التطبيق أثناء تثبيت الأصوات.")
+                        }
                     },
                     confirmButton = {
-                        TextButton(onClick = { showHelp = false }) {
-                            Text("حسنًا", color = Gold)
-                        }
+                        TextButton(onClick = { showHelp = false }) { Text("فهمت", color = Gold) }
+                    }
+                )
+            }
+
+            if (showDeleteConfirmation) {
+                AlertDialog(
+                    onDismissRequest = { showDeleteConfirmation = false },
+                    containerColor = SurfaceDark,
+                    title = { Text("حذف حزمة الأصوات؟", color = Gold) },
+                    text = { Text("سيتم حذف ملفات النماذج من الهاتف. ستحتاج إلى الإنترنت لتنزيلها مرة أخرى قبل استخدام التحويل المحلي.", color = TextMain) },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            engine.deleteDownloadedModels()
+                            modelReady = false
+                            lastFile = null
+                            showDeleteConfirmation = false
+                            status = "تم حذف حزمة الأصوات من الهاتف."
+                        }) { Text("حذف", color = Color(0xFFE4A3A3)) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showDeleteConfirmation = false }) { Text("إلغاء", color = Gold) }
                     }
                 )
             }
@@ -491,46 +514,68 @@ private fun SawtStudio() {
 }
 
 @Composable
-private fun VoiceCard(
-    title: String,
-    subtitle: String,
-    selected: Boolean,
-    enabled: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    val borderColor = if (selected) Gold else Border
+private fun LanguageButton(label: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier.height(46.dp),
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = if (selected) Color(0xFF211C13) else SurfaceDark,
+            contentColor = if (selected) Gold else TextMuted
+        ),
+        border = BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) Gold else Border),
+        shape = RoundedCornerShape(14.dp)
+    ) { Text(label, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) }
+}
+
+@Composable
+private fun VoiceChoice(voice: VoiceStyle, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
         color = if (selected) Color(0xFF211C13) else SurfaceDark,
-        shape = RoundedCornerShape(18.dp),
-        border = androidx.compose.foundation.BorderStroke(if (selected) 1.5.dp else 1.dp, borderColor),
-        modifier = modifier
-            .height(92.dp)
-            .clickable(enabled = enabled, onClick = onClick)
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) Gold else Border),
+        modifier = modifier.height(62.dp).clickable(onClick = onClick)
     ) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 13.dp, vertical = 14.dp),
+            modifier = Modifier.fillMaxSize().padding(vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Text(title, color = if (enabled) TextMain else TextMuted, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(5.dp))
-            Text(
-                if (enabled) subtitle else "غير متاح حاليًا",
-                color = if (selected) Gold else TextMuted,
-                fontSize = 10.sp
-            )
+            Text(voice.name, color = if (selected) Gold else TextMain, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(2.dp))
+            Text(voice.description, color = TextMuted, fontSize = 8.sp)
         }
     }
 }
 
+@Composable
+private fun QualityButton(label: String, steps: Int, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier.height(42.dp),
+        contentPadding = PaddingValues(horizontal = 4.dp),
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = if (selected) Color(0xFF211C13) else SurfaceDark,
+            contentColor = if (selected) Gold else TextMuted
+        ),
+        border = BorderStroke(1.dp, if (selected) Gold else Border),
+        shape = RoundedCornerShape(12.dp)
+    ) { Text(label, fontSize = 11.sp) }
+}
+
+@Composable
+private fun HelpSection(title: String, body: String) {
+    Text(title, color = Gold, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+    Spacer(Modifier.height(3.dp))
+    Text(body, color = TextMain, fontSize = 12.sp, lineHeight = 20.sp)
+    Spacer(Modifier.height(13.dp))
+}
+
 private fun saveAudioToDownloads(context: Context, source: File): String {
-    val extension = if (source.extension.equals("wav", true)) "wav" else "mp3"
-    val mimeType = if (extension == "wav") "audio/wav" else "audio/mpeg"
-    val filename = "SAWT-${System.currentTimeMillis()}.$extension"
+    val filename = "SAWT-${System.currentTimeMillis()}.wav"
     if (Build.VERSION.SDK_INT >= 29) {
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+            put(MediaStore.MediaColumns.MIME_TYPE, "audio/wav")
             put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/SAWT AI")
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
@@ -543,9 +588,9 @@ private fun saveAudioToDownloads(context: Context, source: File): String {
             values.clear()
             values.put(MediaStore.MediaColumns.IS_PENDING, 0)
             context.contentResolver.update(uri, values, null, null)
-        } catch (e: Exception) {
+        } catch (error: Exception) {
             context.contentResolver.delete(uri, null, null)
-            throw e
+            throw error
         }
     } else {
         val folder = File(context.getExternalFilesDir(Environment.DIRECTORY_MUSIC), "SAWT AI").apply { mkdirs() }
