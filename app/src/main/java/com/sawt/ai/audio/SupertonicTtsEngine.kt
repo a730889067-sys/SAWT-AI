@@ -75,7 +75,7 @@ class SupertonicTtsEngine(context: Context) {
                 !file.isFile || file.length() < minimumBytes
             }
             if (missing != null) {
-                throw IOException("ملفات النموذج غير مكتملة (\${missing.first}). أُوقف التثبيت لحماية التطبيق.")
+                throw IOException("ملفات النموذج غير مكتملة (${missing.first}). أُوقف التثبيت لحماية التطبيق.")
             }
 
             File(extractedModelDirectory, ".sawt-verified").writeText(ARCHIVE_SHA256)
@@ -126,7 +126,7 @@ class SupertonicTtsEngine(context: Context) {
             throw IOException("لم ينتج محرك الصوت ملفًا صالحًا. جرّب نصًا أقصر.")
         }
 
-        val output = File(appContext.cacheDir, "sawt-\${System.currentTimeMillis()}.wav")
+        val output = File(appContext.cacheDir, "sawt-${System.currentTimeMillis()}.wav")
         if (!audio.save(output.absolutePath) || !output.isFile || output.length() < 44L) {
             output.delete()
             throw IOException("تعذر حفظ الصوت الناتج.")
