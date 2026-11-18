@@ -1,22 +1,27 @@
-# إشعارات وتراخيص المكونات الخارجية — SAWT AI
+# إشعارات وتراخيص المكونات الخارجية — SAWT AI 1.5.0
 
-يحتوي محرك الصوت المحلي على مكونات خارجية. يجب الاحتفاظ بهذه الإشعارات ومراجعة شروط كل مكوّن قبل توزيع التطبيق.
+يحتوي التطبيق على مكونات خارجية. احتفظ بهذه الإشعارات مع النسخ الموزعة، وراجع النص الكامل للترخيص قبل إعادة توزيع التطبيق أو أوزان النموذج.
 
 | المكوّن | الاستخدام | الترخيص | المصدر |
 |---|---|---|---|
-| Nabra-7M-Distill-ONNX | نموذج صوت عربي فصيح بصوت نسائي واحد | Apache-2.0 | https://huggingface.co/oddadmix/Nabra-7M-Distill-ONNX |
-| nabra-tts | واجهة JavaScript ومحرك تشغيل النموذج | Apache-2.0 | https://github.com/Oddadmix/nabra-tts |
-| eSpeak-NG 1.52 | التحويل من النص العربي إلى الفونيمات، مضمّن ضمن حزمة Nabra | GPL-3.0-or-later | https://github.com/espeak-ng/espeak-ng |
-| منطق phonemizer المنقول | معالجة الفونيمات وعلامات الترقيم ضمن Nabra | GPL-3.0 | https://github.com/bootphon/phonemizer |
-| Ichkil v0.3.0 | التشكيل الآلي للنص العربي | MIT | https://huggingface.co/ichkil/ichkil |
-| ONNX Runtime Web | تنفيذ نماذج ONNX عبر WASM | MIT | https://github.com/microsoft/onnxruntime |
+| Sherpa-ONNX Android AAR v2.0.1 | محرك الاستدلال الصوتي الأصلي لـ Android | Apache-2.0 | https://github.com/k2-fsa/sherpa-onnx |
+| Supertonic 3 INT8 model weights | نموذج تحويل النص إلى كلام، 31 لغة منها العربية والإنجليزية | OpenRAIL-M | https://huggingface.co/Supertone/supertonic-3 |
+| Supertonic 3 quantized model package | نسخة INT8 المجهزة لـ Sherpa-ONNX | OpenRAIL-M (الأوزان) مع إشعارات التحويل | https://huggingface.co/csukuangfj2/sherpa-onnx-supertonic-3-tts-int8-2026-05-11 |
+| Apache Commons Compress 1.27.1 | فك ضغط أرشيف النموذج BZip2/TAR | Apache-2.0 | https://commons.apache.org/proper/commons-compress/ |
+| Apache Commons IO 2.18.0 | مكتبة مساعدة لعمليات الملفات | Apache-2.0 | https://commons.apache.org/proper/commons-io/ |
 
-## ملاحظة مهمة حول eSpeak-NG
+## ملاحظات مهمة حول Supertonic 3
 
-تتضمن حزمة Nabra ملف eSpeak-NG WASM ومنطقًا منقولًا من phonemizer، وكلاهما يتضمن مكونات GPL. راجع ملف THIRD_PARTY_NOTICES الخاص بالمصدر المثبّت هنا: https://github.com/Oddadmix/nabra-tts/tree/16b5281ce61993df3526740990cf845a3f3036f4 . عند توزيع التطبيق يجب مراجعة الالتزامات القانونية الخاصة بتوفير الشيفرة المصدرية المطابقة والإشعارات وشروط إعادة التوزيع. وجود هذه المكونات في APK يجعل مراجعة الترخيص شرطًا قبل إصدار عام أو تجاري. لا يُعد هذا الملف استشارة قانونية.
+- حقوق النموذج © Supertone Inc.، 2026.
+- أوزان النموذج ليست مرخصة بموجب MIT؛ الترخيص المطبق عليها هو BigScience OpenRAIL-M.
+- يلزم إظهار الإسناد إلى Supertone والمحافظة على قيود الاستخدام المرفقة بالترخيص.
+- تتضمن القيود حظر الاستخدام المخالف للقانون، وإيذاء الآخرين، وانتحال الأشخاص دون موافقتهم، وإنشاء معلومات مضللة أو نشر مخرجات مولدة آليًا دون الإفصاح المناسب في السياق الذي قد يسبب التضليل.
+- لا يوفر التطبيق ميزة استنساخ صوت المستخدم أو تحميل عينات لتقليد أصوات أشخاص آخرين.
+- يجب مراجعة النسخة الكاملة من الترخيص عند المصدر الرسمي: https://huggingface.co/Supertone/supertonic-3/blob/main/LICENSE
+- قد تختلف شروط إعادة توزيع النموذج عن شروط إعادة توزيع كود المحرك. لا تخلط بين Apache-2.0 للمحرك وOpenRAIL-M للأوزان.
 
-## تثبيت المصادر
+## مكونات المصدر القديمة غير المضمنة في إصدار 1.5.0
 
-- يبني GitHub Actions حزمة nabra-tts من مستودع المصدر الرسمي، ويجب تثبيت رقم commit محدد لضمان قابلية إعادة البناء.
-- ملفات النموذج والتشكيل تُنزّل عند أول استخدام من مستودعاتها العامة وتُخزّن محليًا.
-- راجع ملفات LICENSE وTHIRD_PARTY_NOTICES في المستودعات الأصلية للحصول على النصوص الكاملة للتراخيص.
+يحتفظ المستودع ببعض ملفات Nabra وIchkil وملفات العميل السحابي من النموذج السابق لأغراض التوثيق/التاريخ. لم تعد واجهة إصدار 1.5.0 تستخدم هذه الملفات أو تحزمها ضمن مسار توليد الصوت. إذا أُعيد تفعيلها في بناء لاحق، فيجب تطبيق إشعاراتها وتراخيصها الخاصة قبل التوزيع.
+
+لا يعد هذا الملف استشارة قانونية.
