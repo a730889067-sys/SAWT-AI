@@ -87,8 +87,35 @@ class SupertonicTtsEngine(context: Context) {
                 throw IOException("تعذر تهيئة محرك الصوت على هذا الهاتف: ${error.message ?: "خطأ غير معروف"}", error)
             }
             try {
-                validationEngine.release()
-            } catch (_: Exception) {
+                val smokeTests = listOf(
+                    Triple(5, "ar", "السلام عليكم، هذا اختبار للصوت العربي الرجالي."),
+                    Triple(0, "ar", "مرحبًا، هذا اختبار للصوت العربي النسائي."),
+                    Triple(5, "en", "Hello, this is a male English voice test."),
+                    Triple(0, "en", "Hello, this is a female English voice test.")
+                )
+                smokeTests.forEach { (speaker, lang, sampleText) ->
+                    val sample = validationEngine.generateWithConfig(
+                        sampleText,
+                        GenerationConfig(
+                            sid = speaker,
+                            speed = 1.0f,
+                            numSteps = 5,
+                            extra = mapOf("lang" to lang)
+                        )
+                    )
+                    if (sample.samples.isEmpty() || sample.sampleRate <= 0) {
+                        throw IOException("فشل اختبار توليد الصوت للغة " + lang + " والمتحدث رقم " + speaker + ".")
+                    }
+                }
+            } catch (error: OutOfMemoryError) {
+                throw IOException("ذاكرة الهاتف غير كافية لاختبار توليد الصوت. أغلق التطبيقات الأخرى وأعد المحاولة.", error)
+            } catch (error: Exception) {
+                throw IOException("لم يجتز محرك الصوت اختبار العربية والإنجليزية والرجالي والنسائي: " + (error.message ?: "خطأ غير معروف"), error)
+            } finally {
+                try {
+                    validationEngine.release()
+                } catch (_: Exception) {
+                }
             }
 
             File(extractedModelDirectory, ".sawt-verified").writeText(ARCHIVE_SHA256)
