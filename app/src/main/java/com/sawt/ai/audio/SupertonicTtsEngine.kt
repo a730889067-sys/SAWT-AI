@@ -31,18 +31,32 @@ class SupertonicTtsEngine(context: Context) {
 
     fun isModelInstalled(): Boolean {
         val marker = File(modelDirectory, ".sawt-verified")
-        if (!marker.isFile || marker.readText().trim() != ARCHIVE_SHA256) return false
+        if (!marker.isFile) return false
+        val markerValue = marker.readText().trim()
+        if (markerValue != ARCHIVE_SHA256 && markerValue != OPTIMIZED_INSTALL_MARKER) return false
         return requiredModelFiles.all { (name, minimumBytes) ->
             File(modelDirectory, name).let { it.isFile && it.length() >= minimumBytes }
         }
+    }
+
+    fun needsOptimization(): Boolean {
+        val marker = File(modelDirectory, ".sawt-verified")
+        return isModelInstalled() && marker.readText().trim() == ARCHIVE_SHA256
     }
 
     suspend fun downloadAndInstall(
         onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit,
         onStage: (String) -> Unit
     ) = withContext(Dispatchers.IO) {
-        if (isModelInstalled()) {
-            onStage("حزمة الأصوات موجودة وسليمة بالفعل.")
+        if (isModelInstalled() && !needsOptimization()) {
+            onStage("حزمة الأصوات المحسّنة موجودة وسليمة بالفعل.")
+            return@withContext
+        }
+
+        if (needsOptimization()) {
+            onStage("جارٍ تنزيل تحسين السرعة للهواتف…")
+            upgradeInstalledModel(onProgress)
+            onStage("اكتمل تحسين محرك الصوت. يمكنك التحويل دون إنترنت.")
             return@withContext
         }
 
@@ -78,7 +92,12 @@ class SupertonicTtsEngine(context: Context) {
                 throw IOException("ملفات النموذج غير مكتملة (${missing.first}). أُوقف التثبيت لحماية التطبيق.")
             }
 
-            onStage("تم فك الضغط. جارٍ اختبار إنشاء محرك الصوت قبل اعتماد الحزمة…")
+            onStage("جارٍ تنزيل محرك Supertonic المحسّن للهواتف (حوالي 66 ميجابايت)…")
+            val optimizedVector = File(appContext.cacheDir, "vector_estimator.mobile.tmp")
+            downloadOptimizedVectorEstimator(optimizedVector, onProgress)
+            replaceFileSafely(optimizedVector, File(extractedModelDirectory, VECTOR_FILE))
+
+            onStage("تم تجهيز المحرك المحسّن. جارٍ اختبار إنشاء الصوت…")
             val validationEngine = try {
                 createNativeEngine(extractedModelDirectory)
             } catch (error: OutOfMemoryError) {
@@ -118,7 +137,7 @@ class SupertonicTtsEngine(context: Context) {
                 }
             }
 
-            File(extractedModelDirectory, ".sawt-verified").writeText(ARCHIVE_SHA256)
+            File(extractedModelDirectory, ".sawt-verified").writeText(OPTIMIZED_INSTALL_MARKER)
             modelDirectory.deleteRecursively()
             if (!extractedModelDirectory.renameTo(modelDirectory)) {
                 throw IOException("تعذر نقل ملفات الصوت إلى مساحة التطبيق.")
@@ -211,6 +230,76 @@ class SupertonicTtsEngine(context: Context) {
             numThreads = Runtime.getRuntime().availableProcessors().coerceIn(1, 2)
         )
         return OfflineTts(config = config)
+    }
+
+    private fun upgradeInstalledModel(onProgress: (Long, Long) -> Unit) {
+        val optimizedVector = File(appContext.cacheDir, "vector_estimator.mobile.tmp")
+        try {
+            downloadOptimizedVectorEstimator(optimizedVector, onProgress)
+            replaceFileSafely(optimizedVector, File(modelDirectory, VECTOR_FILE))
+            File(modelDirectory, ".sawt-verified").writeText(OPTIMIZED_INSTALL_MARKER)
+        } catch (error: Exception) {
+            optimizedVector.delete()
+            throw error
+        }
+    }
+
+    private fun downloadOptimizedVectorEstimator(
+        destination: File,
+        onProgress: (Long, Long) -> Unit
+    ) {
+        destination.delete()
+        val connection = (URL(OPTIMIZED_VECTOR_URL).openConnection() as HttpURLConnection).apply {
+            instanceFollowRedirects = true
+            connectTimeout = 30_000
+            readTimeout = 90_000
+            requestMethod = "GET"
+            setRequestProperty("User-Agent", "SAWT-AI-Android")
+        }
+        try {
+            connection.connect()
+            val status = connection.responseCode
+            if (status !in 200..299) throw IOException("تعذر تنزيل تحسين الصوت (HTTP $status).")
+            val total = connection.contentLengthLong.takeIf { it > 0 } ?: OPTIMIZED_VECTOR_SIZE_BYTES
+            var downloaded = 0L
+            val digest = MessageDigest.getInstance("SHA-256")
+            BufferedInputStream(connection.inputStream).use { input ->
+                BufferedOutputStream(FileOutputStream(destination)).use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        output.write(buffer, 0, count)
+                        digest.update(buffer, 0, count)
+                        downloaded += count
+                        onProgress(downloaded, total)
+                    }
+                    output.flush()
+                }
+            }
+            if (downloaded < MIN_OPTIMIZED_VECTOR_SIZE_BYTES) {
+                throw IOException("ملف تحسين الصوت غير مكتمل. أعد المحاولة.")
+            }
+            val actualSha = digest.digest().joinToString("") { "%02x".format(it) }
+            if (!actualSha.equals(OPTIMIZED_VECTOR_SHA256, ignoreCase = true)) {
+                throw IOException("فشل التحقق من بصمة تحسين الصوت. لم يتم استبدال النموذج.")
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun replaceFileSafely(source: File, destination: File) {
+        val backup = File(destination.parentFile, destination.name + ".sawt-backup")
+        backup.delete()
+        if (destination.exists() && !destination.renameTo(backup)) {
+            throw IOException("تعذر تجهيز ملف محرك الصوت للاستبدال.")
+        }
+        if (!source.renameTo(destination)) {
+            if (backup.exists()) backup.renameTo(destination)
+            throw IOException("تعذر تثبيت ملف محرك الصوت المحسّن.")
+        }
+        backup.delete()
     }
 
     private fun downloadArchive(
@@ -314,6 +403,13 @@ class SupertonicTtsEngine(context: Context) {
             "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/$MODEL_DIRECTORY.tar.bz2"
         const val ARCHIVE_SHA256 = "82fa96f91c4ef8abaae3a14a3f4153facf88bed821d1f7331cec2700f432c427"
         const val ARCHIVE_SIZE_BYTES = 128_774_318L
+        const val OPTIMIZED_VECTOR_URL =
+            "https://huggingface.co/WilburDev/supertonic-3-mobile/resolve/main/vector_estimator.int8.onnx"
+        const val OPTIMIZED_VECTOR_SHA256 = "6fd0f1637a0192ec2ec160a899045d8138395100a3c25414134adf76abd3f57b"
+        const val OPTIMIZED_VECTOR_SIZE_BYTES = 66_000_000L
+        const val MIN_OPTIMIZED_VECTOR_SIZE_BYTES = 60L * 1024L * 1024L
+        const val VECTOR_FILE = "vector_estimator.int8.onnx"
+        const val OPTIMIZED_INSTALL_MARKER = ARCHIVE_SHA256 + ":" + OPTIMIZED_VECTOR_SHA256
         const val MINIMUM_FREE_SPACE_BYTES = 600L * 1024L * 1024L
         const val MAX_SINGLE_FILE_BYTES = 350L * 1024L * 1024L
         const val MAX_TOTAL_EXTRACTED_BYTES = 500L * 1024L * 1024L
