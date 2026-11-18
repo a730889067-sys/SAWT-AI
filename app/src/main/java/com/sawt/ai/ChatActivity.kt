@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import com.sawt.ai.audio.ChatTurn
 import com.sawt.ai.audio.GeminiChatClient
 import com.sawt.ai.audio.GeminiKeyVault
+import com.sawt.ai.audio.OfflineQuickAssistant
 import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.UUID
