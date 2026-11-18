@@ -98,7 +98,6 @@ private fun SawtStudio() {
     var language by remember { mutableStateOf("ar") }
     var selectedVoice by remember { mutableStateOf(maleVoices.first()) }
     var speed by remember { mutableFloatStateOf(1.0f) }
-    var qualitySteps by remember { mutableIntStateOf(4) }
     var modelReady by remember { mutableStateOf(engine.isModelInstalled()) }
     var modelLoading by remember { mutableStateOf(false) }
     var modelProgress by remember { mutableIntStateOf(0) }
@@ -291,8 +290,7 @@ private fun SawtStudio() {
                                         text = sampleText,
                                         language = language,
                                         speakerId = selectedVoice.speakerId,
-                                        speed = speed,
-                                        qualitySteps = 4
+                                        speed = speed
                                     )
                                     lastFile = sample
                                     lastVoiceName = selectedVoice.name
@@ -449,8 +447,7 @@ private fun SawtStudio() {
                                         text = input.trim(),
                                         language = language,
                                         speakerId = selectedVoice.speakerId,
-                                        speed = speed,
-                                        qualitySteps = qualitySteps
+                                        speed = speed
                                     )
                                     lastFile = result
                                     lastVoiceName = selectedVoice.name
