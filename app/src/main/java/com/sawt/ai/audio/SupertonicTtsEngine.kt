@@ -48,7 +48,7 @@ class SupertonicTtsEngine(context: Context) {
 
         val availableBytes = StatFs(appContext.filesDir.absolutePath).availableBytes
         if (availableBytes < MINIMUM_FREE_SPACE_BYTES) {
-            throw IOException("يلزم توفر 380 ميجابايت تقريبًا من المساحة الفارغة لإكمال تنزيل الأصوات وتثبيتها.")
+            throw IOException("يلزم توفر 600 ميجابايت تقريبًا من المساحة الفارغة لإكمال تنزيل الأصوات وتثبيتها.")
         }
 
         modelsRoot.mkdirs()
