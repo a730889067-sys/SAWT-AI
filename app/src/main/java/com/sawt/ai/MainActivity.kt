@@ -102,6 +102,9 @@ private fun SawtStudio() {
     var modelProgress by remember { mutableIntStateOf(0) }
     var modelStage by remember { mutableStateOf("الأصوات غير مثبتة بعد") }
     var generating by remember { mutableStateOf(false) }
+    var previewing by remember { mutableStateOf(false) }
+    var lastVoiceName by remember { mutableStateOf("") }
+    var lastLanguageName by remember { mutableStateOf("") }
     var saving by remember { mutableStateOf(false) }
     var lastFile by remember { mutableStateOf<File?>(null) }
     var status by remember { mutableStateOf("اكتب نصك، اختر الصوت، ثم أنشئ التسجيل.") }
@@ -255,6 +258,50 @@ private fun SawtStudio() {
                             }
                         }
                     }
+                    Spacer(Modifier.height(9.dp))
+                    OutlinedButton(
+                        onClick = {
+                            if (!modelReady || generating || previewing) return@OutlinedButton
+                            previewing = true
+                            lastFile = null
+                            errorMessage = null
+                            status = "جارٍ إنشاء عينة قصيرة للصوت ${selectedVoice.name}…"
+                            scope.launch {
+                                try {
+                                    val sampleText = if (language == "ar") {
+                                        "السلام عليكم. هذا نموذج تجريبي لصوت ساوت إيه آي، يمكنك الاستماع إليه قبل تحويل نصك."
+                                    } else {
+                                        "Hello. This is a short SAWT AI voice sample. Listen before converting your text."
+                                    }
+                                    val sample = engine.synthesizeToFile(
+                                        text = sampleText,
+                                        language = language,
+                                        speakerId = selectedVoice.speakerId,
+                                        speed = speed,
+                                        qualitySteps = 8
+                                    )
+                                    lastFile = sample
+                                    lastVoiceName = selectedVoice.name
+                                    lastLanguageName = if (language == "ar") "العربية" else "English"
+                                    SpeechPlaybackService.playFile(context, sample.absolutePath)
+                                    status = "تستمع الآن إلى عينة ${selectedVoice.name}. يمكنك حفظها أو اختيار صوت آخر."
+                                } catch (error: Exception) {
+                                    errorMessage = error.message ?: "تعذر إنشاء عينة الصوت."
+                                    status = "لم تكتمل عينة الصوت."
+                                } finally {
+                                    previewing = false
+                                }
+                            }
+                        },
+                        enabled = modelReady && !modelLoading && !generating && !previewing,
+                        modifier = Modifier.fillMaxWidth().height(46.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Gold),
+                        border = BorderStroke(1.dp, GoldSoft)
+                    ) {
+                        Icon(Icons.Default.GraphicEq, contentDescription = null)
+                        Spacer(Modifier.width(7.dp))
+                        Text(if (previewing) "جارٍ تجهيز العينة…" else "استمع إلى عينة الصوت المحدد")
+                    }
 
                     Spacer(Modifier.height(19.dp))
                     Text("٤. اضبط سرعة القراءة والجودة", color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
@@ -382,6 +429,8 @@ private fun SawtStudio() {
                                         qualitySteps = qualitySteps
                                     )
                                     lastFile = result
+                                    lastVoiceName = selectedVoice.name
+                                    lastLanguageName = if (language == "ar") "العربية" else "English"
                                     SpeechPlaybackService.playFile(context, result.absolutePath)
                                     status = "اكتمل إنشاء الصوت وبدأ تشغيله."
                                 } catch (error: Exception) {
@@ -392,7 +441,7 @@ private fun SawtStudio() {
                                 }
                             }
                         },
-                        enabled = modelReady && !modelLoading && !generating && input.isNotBlank(),
+                        enabled = modelReady && !modelLoading && !generating && !previewing && input.isNotBlank(),
                         modifier = Modifier.fillMaxWidth().height(58.dp),
                         shape = RoundedCornerShape(18.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -412,6 +461,26 @@ private fun SawtStudio() {
                     }
 
                     if (lastFile != null) {
+                        Spacer(Modifier.height(11.dp))
+                        Surface(
+                            color = SurfaceDark,
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, GoldSoft),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.GraphicEq, contentDescription = null, tint = Gold, modifier = Modifier.size(30.dp))
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text("ملفك الصوتي جاهز", color = Gold, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    Text("الصوت: $lastVoiceName  •  اللغة: $lastLanguageName", color = TextMain, fontSize = 11.sp)
+                                    Text(lastFile?.name.orEmpty(), color = TextMuted, fontSize = 10.sp)
+                                }
+                            }
+                        }
                         Spacer(Modifier.height(11.dp))
                         OutlinedButton(
                             onClick = {
