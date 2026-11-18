@@ -23,7 +23,6 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -461,62 +460,71 @@ private fun SawtStudio() {
                     }
 
                     if (lastFile != null) {
-                        Spacer(Modifier.height(11.dp))
+                        Spacer(Modifier.height(12.dp))
                         Surface(
-                            color = SurfaceDark,
-                            shape = RoundedCornerShape(16.dp),
+                            color = Color(0xFF171717),
+                            shape = RoundedCornerShape(24.dp),
                             border = BorderStroke(1.dp, GoldSoft),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
-                                modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 13.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.GraphicEq, contentDescription = null, tint = Gold, modifier = Modifier.size(30.dp))
+                                IconButton(
+                                    onClick = {
+                                        lastFile?.let { SpeechPlaybackService.playFile(context, it.absolutePath) }
+                                    },
+                                    modifier = Modifier.size(48.dp).clip(CircleShape).background(Gold)
+                                ) {
+                                    Icon(Icons.Default.PlayArrow, contentDescription = "استمع إلى الصوت", tint = Background, modifier = Modifier.size(28.dp))
+                                }
                                 Spacer(Modifier.width(12.dp))
                                 Column(Modifier.weight(1f)) {
-                                    Text("ملفك الصوتي جاهز", color = Gold, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                    Text("الصوت: $lastVoiceName  •  اللغة: $lastLanguageName", color = TextMain, fontSize = 11.sp)
-                                    Text(lastFile?.name.orEmpty(), color = TextMuted, fontSize = 10.sp)
+                                    Text("الصوت جاهز للاستماع", color = TextMain, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text("$lastVoiceName · $lastLanguageName", color = GoldSoft, fontSize = 11.sp)
+                                    Spacer(Modifier.height(7.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().height(18.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        val bars = listOf(5, 11, 15, 8, 17, 10, 6, 14, 18, 9, 13, 6, 16, 10, 5, 14, 8, 17, 11, 6)
+                                        bars.forEach { bar ->
+                                            Box(
+                                                Modifier.weight(1f).height(bar.dp).clip(RoundedCornerShape(3.dp)).background(GoldSoft.copy(alpha = 0.78f))
+                                            )
+                                        }
+                                    }
+                                    Text("يمكنك الاستماع الآن أو حفظ الملف", color = TextMuted, fontSize = 9.sp)
                                 }
-                            }
-                        }
-                        Spacer(Modifier.height(11.dp))
-                        OutlinedButton(
-                            onClick = {
-                                lastFile?.let { SpeechPlaybackService.playFile(context, it.absolutePath) }
-                            },
-                            modifier = Modifier.fillMaxWidth().height(48.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Gold),
-                            border = BorderStroke(1.dp, GoldSoft)
-                        ) {
-                            Icon(Icons.Default.Refresh, contentDescription = null)
-                            Spacer(Modifier.width(7.dp))
-                            Text("إعادة الاستماع")
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        Button(
-                            onClick = {
-                                val file = lastFile ?: return@Button
-                                saving = true
-                                scope.launch {
-                                    try {
-                                        val name = withContext(Dispatchers.IO) { saveAudioToDownloads(context, file) }
-                                        status = "تم حفظ $name داخل التنزيلات / SAWT AI."
-                                    } catch (error: Exception) {
-                                        errorMessage = error.message ?: "تعذر حفظ ملف الصوت."
-                                    } finally {
-                                        saving = false
+                                Spacer(Modifier.width(8.dp))
+                                IconButton(
+                                    onClick = {
+                                        val file = lastFile ?: return@IconButton
+                                        if (saving) return@IconButton
+                                        saving = true
+                                        scope.launch {
+                                            try {
+                                                val name = withContext(Dispatchers.IO) { saveAudioToDownloads(context, file) }
+                                                status = "تم حفظ $name داخل التنزيلات / SAWT AI."
+                                            } catch (error: Exception) {
+                                                errorMessage = error.message ?: "تعذر حفظ ملف الصوت."
+                                            } finally {
+                                                saving = false
+                                            }
+                                        }
+                                    },
+                                    enabled = !saving,
+                                    modifier = Modifier.size(46.dp).clip(CircleShape).background(SurfaceRaised)
+                                ) {
+                                    if (saving) {
+                                        CircularProgressIndicator(Modifier.size(20.dp), color = Gold, strokeWidth = 2.dp)
+                                    } else {
+                                        Icon(Icons.Default.Download, contentDescription = "تنزيل الصوت", tint = Gold, modifier = Modifier.size(24.dp))
                                     }
                                 }
-                            },
-                            enabled = !saving,
-                            modifier = Modifier.fillMaxWidth().height(52.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = SurfaceRaised, contentColor = Gold)
-                        ) {
-                            Icon(Icons.Default.Download, contentDescription = null)
-                            Spacer(Modifier.width(7.dp))
-                            Text(if (saving) "جارٍ حفظ الملف…" else "حفظ الصوت على الهاتف (WAV)")
+                            }
                         }
                     }
 
@@ -546,7 +554,7 @@ private fun SawtStudio() {
                             HelpSection("٣. اختيار اللغة", "اختر «العربية» عندما يكون النص عربيًا، واختر English عندما يكون النص إنجليزيًا. الأفضل أن يكون النص بلغة واحدة في كل عملية حتى تكون القراءة أوضح.")
                             HelpSection("٤. اختيار الصوت", "ستجد خمسة أصوات رجالية M1 إلى M5، وخمسة أصوات نسائية F1 إلى F5. اضغط على بطاقة الصوت الذي تريد سماعه. يمكنك تغيير الصوت في أي وقت، وجميعها متاحة للغتين العربية والإنجليزية.")
                             HelpSection("٥. السرعة والجودة", "حرّك شريط السرعة من 0.8× إلى 1.2×. اختر «سريع» لإنشاء أسرع، أو «متوازن» وهو الاختيار الافتراضي، أو «أعلى جودة» وقد يستغرق وقتًا أطول قليلًا.")
-                            HelpSection("٦. إنشاء الصوت والاستماع", "بعد كتابة النص واختيار اللغة والصوت، اضغط «إنشاء الصوت والاستماع». سيُنشئ التطبيق ملف WAV على الهاتف ويبدأ تشغيله تلقائيًا. اضغط «إعادة الاستماع» لسماع الملف مرة أخرى.")
+                            HelpSection("٦. إنشاء الصوت والاستماع", "بعد كتابة النص واختيار اللغة والصوت، اضغط «إنشاء الصوت والاستماع». سيُنشئ التطبيق ملف WAV على الهاتف ويبدأ تشغيله تلقائيًا. اضغط زر التشغيل الدائري داخل بطاقة الصوت لسماعه مرة أخرى، أو اضغط سهم التنزيل الموجود بجانبه لحفظ الملف.")
                             HelpSection("٧. حفظ الصوت وإيجاده", "اضغط «حفظ الصوت على الهاتف (WAV)». سيظهر الملف في تطبيق الملفات داخل: التنزيلات (Download) ثم مجلد SAWT AI. يمكنك فتحه أو مشاركته من هناك.")
                             HelpSection("٨. العمل دون إنترنت والخصوصية", "الإنترنت مطلوب لتنزيل حزمة النماذج أول مرة فقط. بعد اكتمال التثبيت يعمل إنشاء الصوت محليًا على الهاتف دون اتصال، ولا يحتاج إلى خادم مدفوع. لا يرسل التطبيق النص إلى خدمة سحابية أثناء التحويل المحلي.")
                             HelpSection("٩. عند فشل التنزيل", "تأكد من اتصال الإنترنت ومن وجود مساحة فارغة كافية، ثم اضغط زر التنزيل مرة أخرى. إذا انقطع الاتصال أثناء التنزيل فسيبدأ التنزيل من جديد. لا تحذف بيانات التطبيق أثناء تثبيت الأصوات.")
