@@ -8,7 +8,6 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.media.MediaPlayer
-import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.sawt.ai.MainActivity
@@ -102,12 +101,10 @@ class SpeechPlaybackService : Service() {
     }
 
     private fun createChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            getSystemService(NotificationManager::class.java)
-                .createNotificationChannel(
-                    NotificationChannel(CHANNEL_ID, "تشغيل الصوت", NotificationManager.IMPORTANCE_LOW)
-                )
-        }
+        getSystemService(NotificationManager::class.java)
+            .createNotificationChannel(
+                NotificationChannel(CHANNEL_ID, "تشغيل الصوت", NotificationManager.IMPORTANCE_LOW)
+            )
     }
 
     override fun onDestroy() {
@@ -129,14 +126,13 @@ class SpeechPlaybackService : Service() {
                 action = ACTION_PLAY_FILE
                 putExtra(EXTRA_FILE, path)
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
-            else context.startService(intent)
+            context.startForegroundService(intent)
         }
 
         fun stop(context: Context) {
-            val intent = Intent(context, SpeechPlaybackService::class.java).setAction(ACTION_STOP)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
-            else context.startService(intent)
+            // The service is already foreground while playing; stopping it directly
+            // avoids starting a new foreground-service request just to stop playback.
+            context.stopService(Intent(context, SpeechPlaybackService::class.java))
         }
     }
 }
