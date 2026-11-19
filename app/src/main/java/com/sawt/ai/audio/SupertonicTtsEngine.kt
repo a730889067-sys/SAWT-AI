@@ -18,6 +18,7 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import java.util.Locale
 
 /**
  * Native, on-device Supertonic 3 engine.
@@ -351,6 +352,10 @@ class SupertonicTtsEngine(context: Context) {
                         }
                         BufferedOutputStream(FileOutputStream(target)).use { output ->
                             val buffer = ByteArray(64 * 1024)
+                            var entryBytesWritten = 0L
+                            var nextProgressAt = 1L * 1024L * 1024L
+                            val displayName = File(entry.name).name
+                            val entrySize = entry.size.coerceAtLeast(1L)
                             while (true) {
                                 val count = tar.read(buffer)
                                 if (count < 0) break
@@ -359,6 +364,14 @@ class SupertonicTtsEngine(context: Context) {
                                     throw IOException("تجاوزت ملفات النموذج الحجم الآمن المسموح.")
                                 }
                                 output.write(buffer, 0, count)
+                                entryBytesWritten += count
+                                if (entryBytesWritten >= nextProgressAt || entryBytesWritten >= entrySize) {
+                                    onStage(
+                                        "جارٍ فك ضغط $displayName · " +
+                                            "${formatMiB(entryBytesWritten)}/${formatMiB(entrySize)}…"
+                                    )
+                                    nextProgressAt = entryBytesWritten + 1L * 1024L * 1024L
+                                }
                             }
                         }
                         filesWritten++
@@ -373,6 +386,9 @@ class SupertonicTtsEngine(context: Context) {
         if (filesWritten < requiredModelFiles.size) throw IOException("لم تكتمل ملفات النموذج أثناء التثبيت.")
         onStage("اكتمل فك ضغط ملفات الأصوات (${requiredModelFiles.size}/${requiredModelFiles.size}).")
     }
+
+    private fun formatMiB(bytes: Long): String =
+        String.format(Locale.US, "%.1f MB", bytes.toDouble() / (1024.0 * 1024.0))
 
     private fun sha256(file: File, onProgress: (Long, Long) -> Unit): String {
         val digest = MessageDigest.getInstance("SHA-256")
