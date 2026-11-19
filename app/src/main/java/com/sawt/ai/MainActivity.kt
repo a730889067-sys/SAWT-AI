@@ -2,7 +2,6 @@ package com.sawt.ai
 
 import android.content.ContentValues
 import android.content.Context
-import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -21,7 +20,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.HelpOutline
@@ -44,6 +42,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import com.sawt.ai.audio.SpeechPlaybackService
 import com.sawt.ai.audio.SupertonicTtsEngine
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -101,9 +100,15 @@ private fun SawtStudio() {
     var modelReady by remember { mutableStateOf(engine.isModelInstalled()) }
     var modelLoading by remember { mutableStateOf(false) }
     var modelProgress by remember { mutableIntStateOf(0) }
+    var modelProgressIndeterminate by remember { mutableStateOf(false) }
     var modelStage by remember { mutableStateOf("الأصوات غير مثبتة بعد") }
     var generating by remember { mutableStateOf(false) }
     var previewing by remember { mutableStateOf(false) }
+    var generationStartedAt by remember { mutableLongStateOf(0L) }
+    var generationElapsedMs by remember { mutableLongStateOf(0L) }
+    var generatedAudioMs by remember { mutableLongStateOf(0L) }
+    var estimatedTotalMs by remember { mutableLongStateOf(0L) }
+    var generationStage by remember { mutableStateOf("جارٍ تجهيز الصوت…") }
     var lastVoiceName by remember { mutableStateOf("") }
     var lastLanguageName by remember { mutableStateOf("") }
     var saving by remember { mutableStateOf(false) }
@@ -111,6 +116,9 @@ private fun SawtStudio() {
     // Reuse short preview WAVs during this app session instead of synthesizing
     // the same speaker/language/speed combination repeatedly.
     val previewCache = remember { mutableMapOf<String, File>() }
+    val metricsPrefs = remember(context) {
+        context.getSharedPreferences("sawt_generation_metrics", Context.MODE_PRIVATE)
+    }
     var status by remember { mutableStateOf("اكتب نصك، اختر الصوت، ثم أنشئ التسجيل.") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showHelp by remember { mutableStateOf(false) }
@@ -118,6 +126,13 @@ private fun SawtStudio() {
 
     DisposableEffect(engine) {
         onDispose { engine.close() }
+    }
+
+    LaunchedEffect(generating, previewing, generationStartedAt) {
+        while (generating || previewing) {
+            generationElapsedMs = (SystemClock.elapsedRealtime() - generationStartedAt).coerceAtLeast(0L)
+            delay(500)
+        }
     }
 
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
@@ -170,17 +185,6 @@ private fun SawtStudio() {
                     Text("أصوات عربية وإنجليزية تعمل على هاتفك", color = TextMuted, fontSize = 13.sp)
 
                     Spacer(Modifier.height(15.dp))
-                    OutlinedButton(
-                        onClick = { context.startActivity(Intent(context, ChatActivity::class.java)) },
-                        modifier = Modifier.fillMaxWidth().height(52.dp),
-                        border = BorderStroke(1.dp, GoldSoft),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Gold)
-                    ) {
-                        Icon(Icons.Default.Chat, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("افتح المساعد الذكي وتحدث معه", fontWeight = FontWeight.SemiBold)
-                    }
-
                     Spacer(Modifier.height(25.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("١. اكتب النص", color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
@@ -282,28 +286,39 @@ private fun SawtStudio() {
                             lastFile = null
                             errorMessage = null
                             status = "جارٍ تجهيز عينة قصيرة للصوت ${selectedVoice.name}…"
+                            val previewLanguage = language
+                            val previewVoice = selectedVoice
+                            val previewSpeed = speed
+                            val sampleText = if (previewLanguage == "ar") {
+                                "السلام عليكم، هذا صوت ساوت إيه آي."
+                            } else {
+                                "Hello, this is SAWT AI."
+                            }
                             val previewStartedAt = SystemClock.elapsedRealtime()
-                            val previewKey = "$language-${selectedVoice.speakerId}-${String.format(Locale.US, "%.1f", speed)}"
+                            generationStartedAt = previewStartedAt
+                            generationElapsedMs = 0L
+                            generatedAudioMs = 0L
+                            estimatedTotalMs = estimateGenerationMs(metricsPrefs, previewLanguage, sampleText.length)
+                            generationStage = "جارٍ تجهيز عينة الصوت…"
+                            val previewKey = "$previewLanguage-${previewVoice.speakerId}-${String.format(Locale.US, "%.1f", previewSpeed)}"
                             scope.launch {
                                 try {
-                                    val sampleText = if (language == "ar") {
-                                        "السلام عليكم، هذا صوت ساوت إيه آي."
-                                    } else {
-                                        "Hello, this is SAWT AI."
-                                    }
                                     val cachedSample = previewCache[previewKey]
                                         ?.takeIf { it.isFile && it.length() > 44L }
                                     val sample = cachedSample ?: engine.synthesizeToFile(
                                         text = sampleText,
-                                        language = language,
-                                        speakerId = selectedVoice.speakerId,
-                                        speed = speed
+                                        language = previewLanguage,
+                                        speakerId = previewVoice.speakerId,
+                                        speed = previewSpeed,
+                                        onStage = { stage -> mainHandler.post { generationStage = stage } },
+                                        onProgress = { audioMs -> mainHandler.post { generatedAudioMs = audioMs } }
                                     ).also { previewCache[previewKey] = it }
                                     lastFile = sample
                                     lastVoiceName = selectedVoice.name
                                     lastLanguageName = if (language == "ar") "العربية" else "English"
                                     SpeechPlaybackService.playFile(context, sample.absolutePath)
-                                    val elapsedSeconds = (SystemClock.elapsedRealtime() - previewStartedAt) / 1000.0
+                                    generationElapsedMs = SystemClock.elapsedRealtime() - previewStartedAt
+                                    val elapsedSeconds = generationElapsedMs / 1000.0
                                     status = if (cachedSample != null) {
                                         "عينة ${selectedVoice.name} جاهزة من الذاكرة. بدأ التشغيل فورًا."
                                     } else {
@@ -385,20 +400,33 @@ private fun SawtStudio() {
                             )
                             if (modelLoading) {
                                 Spacer(Modifier.height(12.dp))
-                                LinearProgressIndicator(
-                                    progress = modelProgress / 100f,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    color = Gold,
-                                    trackColor = SurfaceRaised
-                                )
+                                if (modelProgressIndeterminate) {
+                                    LinearProgressIndicator(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        color = Gold,
+                                        trackColor = SurfaceRaised
+                                    )
+                                } else {
+                                    LinearProgressIndicator(
+                                        progress = modelProgress / 100f,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        color = Gold,
+                                        trackColor = SurfaceRaised
+                                    )
+                                }
                                 Spacer(Modifier.height(5.dp))
-                                Text("$modelStage · $modelProgress%", color = GoldSoft, fontSize = 10.sp)
+                                Text(
+                                    if (modelProgressIndeterminate) modelStage else "$modelStage · $modelProgress%",
+                                    color = GoldSoft,
+                                    fontSize = 10.sp
+                                )
                             } else if (!modelReady || engine.needsOptimization()) {
                                 Spacer(Modifier.height(10.dp))
                                 Button(
                                     onClick = {
                                         modelLoading = true
                                         modelProgress = 0
+                                        modelProgressIndeterminate = false
                                         errorMessage = null
                                         status = if (modelReady) "جارٍ تنزيل تحسين سرعة الصوت…" else "جارٍ تنزيل وتثبيت حزمة الأصوات…"
                                         scope.launch {
@@ -409,7 +437,25 @@ private fun SawtStudio() {
                                                         mainHandler.post { modelProgress = percent }
                                                     },
                                                     onStage = { stage ->
-                                                        mainHandler.post { modelStage = stage }
+                                                        mainHandler.post {
+                                                            modelStage = stage
+                                                            val step = Regex("""\((\d+)/(\d+)\)""").find(stage)
+                                                            if (step != null) {
+                                                                val done = step.groupValues[1].toIntOrNull() ?: 0
+                                                                val total = step.groupValues[2].toIntOrNull() ?: 1
+                                                                modelProgress = (done * 100 / total.coerceAtLeast(1)).coerceIn(0, 100)
+                                                                modelProgressIndeterminate = false
+                                                            } else if (stage.contains("فك ضغط") || stage.contains("تجهيزها للاستخدام")) {
+                                                                modelProgress = 0
+                                                                modelProgressIndeterminate = true
+                                                            } else if (stage.contains("تنزيل") || stage.contains("فحص سلامة")) {
+                                                                modelProgress = 0
+                                                                modelProgressIndeterminate = false
+                                                            } else if (stage.contains("اكتمل")) {
+                                                                modelProgress = 100
+                                                                modelProgressIndeterminate = false
+                                                            }
+                                                        }
                                                     }
                                                 )
                                                 modelReady = engine.isModelInstalled()
@@ -448,29 +494,46 @@ private fun SawtStudio() {
                     Button(
                         onClick = {
                             if (!modelReady || input.isBlank()) return@Button
+                            val requestText = input.trim()
+                            val requestLanguage = language
+                            val requestVoice = selectedVoice
+                            val requestSpeed = speed
                             generating = true
                             saving = false
                             lastFile = null
                             errorMessage = null
                             status = "جارٍ إنشاء الصوت على الهاتف…"
-                            val generationStartedAt = SystemClock.elapsedRealtime()
+                            generationStartedAt = SystemClock.elapsedRealtime()
+                            generationElapsedMs = 0L
+                            generatedAudioMs = 0L
+                            estimatedTotalMs = estimateGenerationMs(metricsPrefs, requestLanguage, requestText.length)
+                            generationStage = "جارٍ تجهيز محرك الصوت…"
+                            val startedAt = generationStartedAt
                             scope.launch {
                                 try {
                                     val result = engine.synthesizeToFile(
-                                        text = input.trim(),
-                                        language = language,
-                                        speakerId = selectedVoice.speakerId,
-                                        speed = speed
+                                        text = requestText,
+                                        language = requestLanguage,
+                                        speakerId = requestVoice.speakerId,
+                                        speed = requestSpeed,
+                                        onStage = { stage -> mainHandler.post { generationStage = stage } },
+                                        onProgress = { audioMs -> mainHandler.post { generatedAudioMs = audioMs } }
                                     )
+                                    val elapsedMs = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L)
+                                    generationElapsedMs = elapsedMs
+                                    val sampleRate = elapsedMs.toFloat() / requestText.length.coerceAtLeast(1)
+                                    val prefKey = "generation_ms_per_char_$requestLanguage"
+                                    val oldRate = metricsPrefs.getFloat(prefKey, 0f)
+                                    val smoothRate = if (oldRate > 0f) oldRate * 0.7f + sampleRate * 0.3f else sampleRate
+                                    metricsPrefs.edit().putFloat(prefKey, smoothRate).apply()
                                     lastFile = result
-                                    lastVoiceName = selectedVoice.name
-                                    lastLanguageName = if (language == "ar") "العربية" else "English"
+                                    lastVoiceName = requestVoice.name
+                                    lastLanguageName = if (requestLanguage == "ar") "العربية" else "English"
                                     SpeechPlaybackService.playFile(context, result.absolutePath)
-                                    val elapsedSeconds = (SystemClock.elapsedRealtime() - generationStartedAt) / 1000.0
-                                    status = "اكتمل إنشاء الصوت خلال ${String.format(Locale.US, "%.1f", elapsedSeconds)} ثانية وبدأ تشغيله."
+                                    status = "اكتمل إنشاء الصوت خلال ${formatDuration(elapsedMs)} وبدأ تشغيله."
                                 } catch (error: Exception) {
                                     errorMessage = error.message ?: "تعذر إنشاء الصوت."
-                                    status = "لم يكتمل إنشاء الصوت."
+                                    status = "تحتاج العملية إلى مراجعة بسيطة؛ يمكنك المحاولة بعد معالجة السبب الموضح."
                                 } finally {
                                     generating = false
                                 }
@@ -493,6 +556,55 @@ private fun SawtStudio() {
                         }
                         Spacer(Modifier.width(9.dp))
                         Text(if (generating) "جارٍ إنشاء الصوت…" else "إنشاء الصوت والاستماع", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    }
+
+                    if (generating || previewing) {
+                        Spacer(Modifier.height(12.dp))
+                        Surface(
+                            color = SurfaceDark,
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, Border),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(Modifier.padding(14.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        if (previewing) "تجهيز عينة الصوت" else "إنشاء التسجيل",
+                                        color = Gold,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    )
+                                    Spacer(Modifier.weight(1f))
+                                    Text("المنقضي ${formatDuration(generationElapsedMs)}", color = TextMuted, fontSize = 10.sp)
+                                }
+                                Spacer(Modifier.height(9.dp))
+                                LinearProgressIndicator(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = Gold,
+                                    trackColor = SurfaceRaised
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    if (generatedAudioMs > 0L) "تم توليد ${formatDuration(generatedAudioMs)} من الصوت حتى الآن."
+                                    else generationStage,
+                                    color = TextMain,
+                                    fontSize = 11.sp
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    when {
+                                        estimatedTotalMs > generationElapsedMs ->
+                                            "الوقت المتبقي التقريبي: ${formatDuration(estimatedTotalMs - generationElapsedMs)}"
+                                        estimatedTotalMs > 0L ->
+                                            "يجري إكمال المقطع؛ التقدير يتحدّث حسب سرعة الهاتف."
+                                        else ->
+                                            "يجري قياس سرعة الهاتف لأول مرة؛ سيظهر تقدير أدق في التحويلات التالية."
+                                    },
+                                    color = GoldSoft,
+                                    fontSize = 10.sp
+                                )
+                            }
+                        }
                     }
 
                     if (lastFile != null) {
@@ -585,11 +697,11 @@ private fun SawtStudio() {
                                 .heightIn(max = 470.dp)
                                 .verticalScroll(rememberScrollState())
                         ) {
-                            HelpSection("١. تنزيل الأصوات أول مرة", "اضغط «تنزيل وتجهيز الأصوات كلها» والهاتف متصل بالإنترنت. حجم الحزمة يقارب 129 ميجابايت، ويطلب التطبيق مساحة فارغة تقارب 600 ميجابايت حتى يستطيع تنزيل الملفات وفك ضغطها بأمان. انتظر حتى تظهر عبارة «الأصوات العشرة مثبتة». لا تحتاج إلى حساب أو اشتراك أو بطاقة دفع.")
+                            HelpSection("١. تنزيل الأصوات أول مرة", "اضغط «تنزيل وتجهيز الأصوات كلها» والهاتف متصل بالإنترنت. سيعرض التطبيق تقدم التنزيل، ثم فحص سلامة الملفات، ثم فك الضغط ملفًا بعد ملف؛ لذلك قد يستمر التجهيز قليلًا بعد وصول التنزيل إلى 100%. الحجم التقريبي 195 ميجابايت، ويُفضّل توفر 600 ميجابايت فارغة.")
                             HelpSection("٢. كتابة النص", "المربع الكبير هو مكان الكتابة. اضغط داخله واكتب من لوحة المفاتيح، أو انسخ نصًا من أي مكان ثم اضغط مطولًا داخل المربع واختر «لصق». يمكنك استخدام علامات الترقيم والفواصل وتقسيم النص إلى فقرات. الحد الأقصى 2000 حرف في العملية الواحدة. للأسماء غير الشائعة، أضف التشكيل يدويًا عند الحاجة لتوضيح النطق.")
                             HelpSection("٣. اختيار اللغة", "اختر «العربية» عندما يكون النص عربيًا، واختر English عندما يكون النص إنجليزيًا. الأفضل أن يكون النص بلغة واحدة في كل عملية حتى تكون القراءة أوضح.")
                             HelpSection("٤. اختيار الصوت", "ستجد خمسة أصوات رجالية M1 إلى M5، وخمسة أصوات نسائية F1 إلى F5. اضغط على بطاقة الصوت الذي تريد سماعه. يمكنك تغيير الصوت في أي وقت، وجميعها متاحة للغتين العربية والإنجليزية.")
-                            HelpSection("٥. السرعة والجودة", "حرّك شريط السرعة من 0.8× إلى 1.2×. اختر «سريع» لإنشاء أسرع، أو «متوازن» وهو الاختيار الافتراضي، أو «أعلى جودة» وقد يستغرق وقتًا أطول قليلًا.")
+                            HelpSection("٥. السرعة والجودة", "حرّك شريط السرعة من 0.8× إلى 1.2×. المحرك يستخدم إعدادًا سريعًا وموفرًا للذاكرة، مع الحفاظ على وضوح النطق.")
                             HelpSection("٦. إنشاء الصوت والاستماع", "بعد كتابة النص واختيار اللغة والصوت، اضغط «إنشاء الصوت والاستماع». سيُنشئ التطبيق ملف WAV على الهاتف ويبدأ تشغيله تلقائيًا. اضغط زر التشغيل الدائري داخل بطاقة الصوت لسماعه مرة أخرى، أو اضغط سهم التنزيل الموجود بجانبه لحفظ الملف.")
                             HelpSection("٧. حفظ الصوت وإيجاده", "بعد الاستماع إلى النتيجة، اضغط سهم التنزيل الموجود بجانب بطاقة الصوت. سيُحفظ الملف بصيغة WAV في تطبيق الملفات داخل: التنزيلات (Download) ثم مجلد SAWT AI. يمكنك فتحه أو مشاركته من هناك.")
                             HelpSection("٨. العمل دون إنترنت والخصوصية", "الإنترنت مطلوب لتنزيل حزمة النماذج أول مرة فقط. بعد اكتمال التثبيت يعمل إنشاء الصوت محليًا على الهاتف دون اتصال، ولا يحتاج إلى خادم مدفوع. لا يرسل التطبيق النص إلى خدمة سحابية أثناء التحويل المحلي.")
@@ -710,4 +822,18 @@ private fun saveAudioToDownloads(context: Context, source: File): String {
         source.copyTo(File(folder, filename), overwrite = true)
     }
     return filename
+}
+
+
+private fun formatDuration(milliseconds: Long): String {
+    val seconds = (milliseconds / 1_000L).coerceAtLeast(0L)
+    val minutes = seconds / 60L
+    val remainder = seconds % 60L
+    return if (minutes > 0L) "${minutes} د ${remainder} ث" else "${seconds} ث"
+}
+
+private fun estimateGenerationMs(contextPrefs: android.content.SharedPreferences, language: String, characterCount: Int): Long {
+    val averageMsPerCharacter = contextPrefs.getFloat("generation_ms_per_char_$language", 0f)
+    if (averageMsPerCharacter <= 0f || characterCount <= 0) return 0L
+    return (averageMsPerCharacter * characterCount).toLong().coerceAtLeast(1_000L)
 }
