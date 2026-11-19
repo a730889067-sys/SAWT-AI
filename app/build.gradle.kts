@@ -17,7 +17,6 @@ android {
   ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
  }
  compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
- kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
  buildFeatures { compose = true; buildConfig = true }
  buildTypes {
   getByName("debug") {
@@ -31,6 +30,7 @@ android {
  }
  packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
 }
+kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
 dependencies {
  implementation(files("libs/sherpa-onnx-2.0.1.aar"))
  implementation("org.apache.commons:commons-compress:1.27.1")
