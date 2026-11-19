@@ -28,6 +28,11 @@ jobs:
           java-version: '17'
           cache: gradle
 
+      - name: Download Android 16 SDK platform and build tools
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
       - name: Download pinned Sherpa-ONNX Android runtime
         run: |
           mkdir -p app/libs
@@ -36,15 +41,15 @@ jobs:
             -o app/libs/sherpa-onnx-2.0.1.aar
           echo "a8d09d1d32f3eb8520482c6d3d43fae674681c5b050385967c70a3c2c9bf0ee7  app/libs/sherpa-onnx-2.0.1.aar" | sha256sum --check -
 
-      - name: Set up Gradle 8.9
+      - name: Set up Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.13'
 
-      - name: Run Android lint and build debug APK
+      - name: Run Android tests, lint and build debug APK
         env:
           ORG_GRADLE_PROJECT_SAWT_API_BASE_URL: ${{ vars.SAWT_API_BASE_URL }}
-        run: gradle lintDebug assembleDebug
+        run: gradle testDebugUnitTest lintDebug assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
