@@ -360,7 +360,7 @@ class SupertonicTtsEngine(context: Context) {
         const val MODEL_DIRECTORY = "sherpa-onnx-supertonic-3-tts-int8-2026-05-11"
         const val ARCHIVE_SHA256 = "82fa96f91c4ef8abaae3a14a3f4153facf88bed821d1f7331cec2700f432c427"
         const val OPTIMIZED_VECTOR_URL =
-            "https://huggingface.co/WilburDev/supertonic-3-mobile/resolve/2d53d75/vector_estimator.int8.onnx"
+            "https://huggingface.co/WilburDev/supertonic-3-mobile/resolve/2d53d752a6e9a1db1bd0f63fe36806dc6d1a3ee5/vector_estimator.int8.onnx"
         const val OPTIMIZED_VECTOR_SHA256 = "6fd0f1637a0192ec2ec160a899045d8138395100a3c25414134adf76abd3f57b"
         const val OPTIMIZED_VECTOR_SIZE_BYTES = 66_000_000L
         const val MIN_OPTIMIZED_VECTOR_SIZE_BYTES = 60L * 1024L * 1024L
