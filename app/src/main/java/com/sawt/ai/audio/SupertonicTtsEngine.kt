@@ -7,23 +7,28 @@ import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.getOfflineTtsConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
-import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
-import java.util.Locale
 
 /**
  * Native, on-device Supertonic 3 engine.
- * Model archives are verified before extraction and remain in app-private storage.
+ * Individual model files are downloaded to a staging directory and SHA-256 checked
+ * before the complete model is moved into app-private storage.
  */
+private data class ModelAsset(
+    val fileName: String,
+    val url: String,
+    val expectedBytes: Long,
+    val minimumBytes: Long,
+    val sha256: String
+)
+
 class SupertonicTtsEngine(context: Context) {
     private val appContext = context.applicationContext
     private val modelsRoot = File(appContext.filesDir, "sawt-models")
@@ -34,7 +39,7 @@ class SupertonicTtsEngine(context: Context) {
         val marker = File(modelDirectory, ".sawt-verified")
         if (!marker.isFile) return false
         val markerValue = marker.readText().trim()
-        if (markerValue != ARCHIVE_SHA256 && markerValue != OPTIMIZED_INSTALL_MARKER) return false
+        if (markerValue != ARCHIVE_SHA256 && markerValue != OPTIMIZED_INSTALL_MARKER && markerValue != DIRECT_INSTALL_MARKER) return false
         return requiredModelFiles.all { (name, minimumBytes) ->
             File(modelDirectory, name).let { it.isFile && it.length() >= minimumBytes }
         }
@@ -54,6 +59,7 @@ class SupertonicTtsEngine(context: Context) {
             return@withContext
         }
 
+        // Keep compatibility with installations created by older app versions.
         if (needsOptimization()) {
             onStage("جارٍ تنزيل تحسين السرعة للهواتف…")
             upgradeInstalledModel(onProgress)
@@ -63,59 +69,56 @@ class SupertonicTtsEngine(context: Context) {
 
         val availableBytes = StatFs(appContext.filesDir.absolutePath).availableBytes
         if (availableBytes < MINIMUM_FREE_SPACE_BYTES) {
-            throw IOException("يلزم توفر 600 ميجابايت تقريبًا من المساحة الفارغة لإكمال تنزيل الأصوات وتثبيتها.")
+            throw IOException("يلزم توفر 350 ميجابايت تقريبًا من المساحة الفارغة لتنزيل الأصوات وتثبيتها.")
         }
 
         modelsRoot.mkdirs()
-        val archive = File(appContext.cacheDir, "$MODEL_DIRECTORY.tar.bz2")
-        val extractingRoot = File(modelsRoot, ".supertonic-installing")
-        archive.delete()
-        extractingRoot.deleteRecursively()
-        onStage("جارٍ تنزيل حزمة الأصوات (حوالي 129 ميجابايت)…")
+        // Remove an abandoned archive from a previous installation attempt.
+        File(appContext.cacheDir, "$MODEL_DIRECTORY.tar.bz2").delete()
+        File(modelsRoot, ".supertonic-installing").deleteRecursively()
+        File(modelsRoot, ".supertonic-previous").deleteRecursively()
+        File(appContext.cacheDir, "vector_estimator.mobile.tmp").delete()
+        File(appContext.cacheDir, "vector_estimator.mobile.tmp").delete()
+
+        val stagingRoot = File(modelsRoot, ".supertonic-installing")
+        val backupRoot = File(modelsRoot, ".supertonic-previous")
+        stagingRoot.deleteRecursively()
+        if (!stagingRoot.mkdirs()) {
+            throw IOException("تعذر تجهيز مساحة تثبيت الأصوات على الهاتف.")
+        }
 
         try {
-            downloadArchive(archive, onProgress)
-            onStage("جارٍ فحص سلامة حزمة الأصوات…")
-            val actualSha = sha256(archive, onProgress)
-            if (!actualSha.equals(ARCHIVE_SHA256, ignoreCase = true)) {
-                throw IOException("فشل التحقق من بصمة الملف. حُذفت النسخة غير السليمة؛ أعد المحاولة.")
+            MODEL_ASSETS.forEachIndexed { index, asset ->
+                onStage("جارٍ تنزيل ${asset.fileName} (${index + 1}/${MODEL_ASSETS.size})…")
+                downloadVerifiedAsset(asset, File(stagingRoot, asset.fileName), onProgress)
+                onStage("تم تنزيل وفحص ${asset.fileName} (${index + 1}/${MODEL_ASSETS.size}).")
             }
 
-            onStage("التحقق سليم. جارٍ تثبيت ملفات النماذج…")
-            extractArchiveSafely(archive, extractingRoot, onStage)
-
-            val extractedModelDirectory = File(extractingRoot, MODEL_DIRECTORY)
             val missing = requiredModelFiles.firstOrNull { (name, minimumBytes) ->
-                val file = File(extractedModelDirectory, name)
+                val file = File(stagingRoot, name)
                 !file.isFile || file.length() < minimumBytes
             }
             if (missing != null) {
                 throw IOException("ملفات النموذج غير مكتملة (${missing.first}). أُوقف التثبيت لحماية التطبيق.")
             }
 
-            onStage("جارٍ تنزيل محرك Supertonic المحسّن للهواتف (حوالي 66 ميجابايت)…")
-            val optimizedVector = File(appContext.cacheDir, "vector_estimator.mobile.tmp")
-            downloadOptimizedVectorEstimator(optimizedVector, onProgress)
-            replaceFileSafely(optimizedVector, File(extractedModelDirectory, VECTOR_FILE))
+            File(stagingRoot, ".sawt-verified").writeText(DIRECT_INSTALL_MARKER)
+            onStage("تم تنزيل وفحص ملفات الأصوات السبعة. جارٍ اعتماد التثبيت…")
 
-            // Avoid four full speech generations during installation.
-            // The model archive and every required model file have already
-            // been SHA-256/size checked. Load ONNX only when the user previews
-            // or converts speech, and keep that live engine cached in memory.
-            onStage("تم التحقق من ملفات النموذج. يجري تجهيزها للاستخدام…")
-
-            File(extractedModelDirectory, ".sawt-verified").writeText(OPTIMIZED_INSTALL_MARKER)
-            modelDirectory.deleteRecursively()
-            if (!extractedModelDirectory.renameTo(modelDirectory)) {
-                throw IOException("تعذر نقل ملفات الصوت إلى مساحة التطبيق.")
+            close()
+            backupRoot.deleteRecursively()
+            if (modelDirectory.exists() && !modelDirectory.renameTo(backupRoot)) {
+                throw IOException("تعذر تجهيز ملفات الصوت القديمة للاستبدال.")
             }
+            if (!stagingRoot.renameTo(modelDirectory)) {
+                if (backupRoot.exists()) backupRoot.renameTo(modelDirectory)
+                throw IOException("تعذر اعتماد ملفات الصوت بعد التحقق منها.")
+            }
+            backupRoot.deleteRecursively()
             onStage("اكتمل تثبيت الأصوات العشرة. يمكنك الآن العمل دون إنترنت.")
         } catch (error: Exception) {
-            extractingRoot.deleteRecursively()
-            modelDirectory.deleteRecursively()
+            stagingRoot.deleteRecursively()
             throw error
-        } finally {
-            archive.delete()
         }
     }
 
@@ -286,144 +289,134 @@ class SupertonicTtsEngine(context: Context) {
         backup.delete()
     }
 
-    private fun downloadArchive(
+    private fun downloadVerifiedAsset(
+        asset: ModelAsset,
         destination: File,
-        onProgress: (Long, Long) -> Unit
+        onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit
     ) {
-        val connection = (URL(ARCHIVE_URL).openConnection() as HttpURLConnection).apply {
+        val partFile = File(destination.parentFile, destination.name + ".part")
+        partFile.delete()
+        val connection = (URL(asset.url).openConnection() as HttpURLConnection).apply {
             instanceFollowRedirects = true
             connectTimeout = 30_000
-            readTimeout = 60_000
+            readTimeout = 120_000
             requestMethod = "GET"
             setRequestProperty("User-Agent", "SAWT-AI-Android")
+            setRequestProperty("Accept-Encoding", "identity")
         }
+        var completed = false
         try {
             connection.connect()
             val status = connection.responseCode
-            if (status !in 200..299) throw IOException("تعذر تنزيل حزمة الأصوات (HTTP $status).")
-            val total = connection.contentLengthLong.takeIf { it > 0 } ?: ARCHIVE_SIZE_BYTES
+            if (status !in 200..299) {
+                throw IOException("تعذر تنزيل ${asset.fileName} (HTTP $status).")
+            }
+
+            val total = connection.contentLengthLong.takeIf { it > 0 }
+                ?: asset.expectedBytes.takeIf { it > 0 }
+                ?: asset.minimumBytes
             var downloaded = 0L
+            val digest = MessageDigest.getInstance("SHA-256")
             BufferedInputStream(connection.inputStream).use { input ->
-                BufferedOutputStream(FileOutputStream(destination)).use { output ->
-                    val buffer = ByteArray(64 * 1024)
+                BufferedOutputStream(FileOutputStream(partFile)).use { output ->
+                    val buffer = ByteArray(128 * 1024)
                     while (true) {
                         val count = input.read(buffer)
                         if (count < 0) break
                         output.write(buffer, 0, count)
+                        digest.update(buffer, 0, count)
                         downloaded += count
                         onProgress(downloaded, total)
                     }
                     output.flush()
                 }
             }
-            if (downloaded != ARCHIVE_SIZE_BYTES) {
-                throw IOException("حجم التنزيل غير مكتمل. أعد المحاولة مع اتصال إنترنت مستقر.")
+
+            if (downloaded < asset.minimumBytes) {
+                throw IOException("تنزيل ${asset.fileName} غير مكتمل. أعد المحاولة.")
             }
+            if (asset.expectedBytes > 0L && downloaded != asset.expectedBytes) {
+                throw IOException("حجم ${asset.fileName} لا يطابق الحجم المتوقع. أُوقف التثبيت.")
+            }
+            val actualSha = digest.digest().joinToString("") { "%02x".format(it) }
+            if (!actualSha.equals(asset.sha256, ignoreCase = true)) {
+                throw IOException("فشل فحص سلامة ${asset.fileName}. لم يتم تثبيت الملف.")
+            }
+
+            if (destination.exists() && !destination.delete()) {
+                throw IOException("تعذر استبدال الملف المؤقت ${asset.fileName}.")
+            }
+            if (!partFile.renameTo(destination)) {
+                throw IOException("تعذر اعتماد الملف ${asset.fileName} بعد فحصه.")
+            }
+            completed = true
         } finally {
             connection.disconnect()
+            if (!completed) partFile.delete()
         }
-    }
-
-    private fun extractArchiveSafely(archive: File, destinationRoot: File, onStage: (String) -> Unit) {
-        destinationRoot.mkdirs()
-        val canonicalRoot = destinationRoot.canonicalFile
-        var expandedBytes = 0L
-        var filesWritten = 0
-        var completedRequiredFiles = 0
-        val requiredNames = requiredModelFiles.map { it.first }.toSet()
-        onStage("جارٍ فك ضغط ملفات الأصوات (0/${requiredModelFiles.size})…")
-        BZip2CompressorInputStream(BufferedInputStream(FileInputStream(archive)), true).use { bzip ->
-            TarArchiveInputStream(bzip).use { tar ->
-                while (true) {
-                    val entry = tar.nextTarEntry ?: break
-                    val target = File(destinationRoot, entry.name)
-                    val canonicalTarget = target.canonicalFile
-                    if (!canonicalTarget.path.startsWith(canonicalRoot.path + File.separator)) {
-                        throw IOException("تحتوي حزمة الصوت على مسار غير آمن.")
-                    }
-                    if (entry.isDirectory) {
-                        if (!target.exists() && !target.mkdirs()) throw IOException("تعذر إنشاء مجلد النموذج.")
-                    } else if (entry.isFile) {
-                        if (entry.size < 0 || entry.size > MAX_SINGLE_FILE_BYTES) {
-                            throw IOException("حجم أحد ملفات النموذج غير متوقع.")
-                        }
-                        target.parentFile?.let { parent ->
-                            if (!parent.exists() && !parent.mkdirs()) throw IOException("تعذر تجهيز مجلد النموذج.")
-                        }
-                        BufferedOutputStream(FileOutputStream(target)).use { output ->
-                            val buffer = ByteArray(64 * 1024)
-                            var entryBytesWritten = 0L
-                            var nextProgressAt = 1L * 1024L * 1024L
-                            val displayName = File(entry.name).name
-                            val entrySize = entry.size.coerceAtLeast(1L)
-                            while (true) {
-                                val count = tar.read(buffer)
-                                if (count < 0) break
-                                expandedBytes += count
-                                if (expandedBytes > MAX_TOTAL_EXTRACTED_BYTES) {
-                                    throw IOException("تجاوزت ملفات النموذج الحجم الآمن المسموح.")
-                                }
-                                output.write(buffer, 0, count)
-                                entryBytesWritten += count
-                                if (entryBytesWritten >= nextProgressAt || entryBytesWritten >= entrySize) {
-                                    onStage(
-                                        "جارٍ فك ضغط $displayName · " +
-                                            "${formatMiB(entryBytesWritten)}/${formatMiB(entrySize)}…"
-                                    )
-                                    nextProgressAt = entryBytesWritten + 1L * 1024L * 1024L
-                                }
-                            }
-                        }
-                        filesWritten++
-                        if (File(entry.name).name in requiredNames) {
-                            completedRequiredFiles++
-                            onStage("جارٍ فك ضغط ملفات الأصوات (${completedRequiredFiles.coerceAtMost(requiredModelFiles.size)}/${requiredModelFiles.size})…")
-                        }
-                    }
-                }
-            }
-        }
-        if (filesWritten < requiredModelFiles.size) throw IOException("لم تكتمل ملفات النموذج أثناء التثبيت.")
-        onStage("اكتمل فك ضغط ملفات الأصوات (${requiredModelFiles.size}/${requiredModelFiles.size}).")
-    }
-
-    private fun formatMiB(bytes: Long): String =
-        String.format(Locale.US, "%.1f MB", bytes.toDouble() / (1024.0 * 1024.0))
-
-    private fun sha256(file: File, onProgress: (Long, Long) -> Unit): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        val totalBytes = file.length().coerceAtLeast(1L)
-        var processedBytes = 0L
-        FileInputStream(file).use { input ->
-            val buffer = ByteArray(128 * 1024)
-            while (true) {
-                val count = input.read(buffer)
-                if (count < 0) break
-                digest.update(buffer, 0, count)
-                processedBytes += count
-                onProgress(processedBytes, totalBytes)
-            }
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     companion object {
         const val MODEL_DIRECTORY = "sherpa-onnx-supertonic-3-tts-int8-2026-05-11"
-        const val ARCHIVE_URL =
-            "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/$MODEL_DIRECTORY.tar.bz2"
         const val ARCHIVE_SHA256 = "82fa96f91c4ef8abaae3a14a3f4153facf88bed821d1f7331cec2700f432c427"
-        const val ARCHIVE_SIZE_BYTES = 128_774_318L
         const val OPTIMIZED_VECTOR_URL =
-            "https://huggingface.co/WilburDev/supertonic-3-mobile/resolve/main/vector_estimator.int8.onnx"
+            "https://huggingface.co/WilburDev/supertonic-3-mobile/resolve/2d53d75/vector_estimator.int8.onnx"
         const val OPTIMIZED_VECTOR_SHA256 = "6fd0f1637a0192ec2ec160a899045d8138395100a3c25414134adf76abd3f57b"
         const val OPTIMIZED_VECTOR_SIZE_BYTES = 66_000_000L
         const val MIN_OPTIMIZED_VECTOR_SIZE_BYTES = 60L * 1024L * 1024L
         const val VECTOR_FILE = "vector_estimator.int8.onnx"
         const val OPTIMIZED_INSTALL_MARKER = ARCHIVE_SHA256 + ":" + OPTIMIZED_VECTOR_SHA256
-        const val MINIMUM_FREE_SPACE_BYTES = 600L * 1024L * 1024L
+        const val DIRECT_INSTALL_MARKER = "hf-cca5a0e6:" + "mobile-2d53d75:" + OPTIMIZED_VECTOR_SHA256
+        const val MINIMUM_FREE_SPACE_BYTES = 350L * 1024L * 1024L
         const val MINIMUM_OPTIMIZATION_SPACE_BYTES = 160L * 1024L * 1024L
-        const val MAX_SINGLE_FILE_BYTES = 350L * 1024L * 1024L
-        const val MAX_TOTAL_EXTRACTED_BYTES = 500L * 1024L * 1024L
+
+        private const val UPSTREAM_MODEL_BASE =
+            "https://huggingface.co/csukuangfj2/sherpa-onnx-supertonic-3-tts-int8-2026-05-11/resolve/cca5a0e6c96e1d2c720986bf7e75fcc81dee3ae4/"
+
+        private val MODEL_ASSETS = listOf(
+            ModelAsset(
+                "duration_predictor.int8.onnx",
+                UPSTREAM_MODEL_BASE + "duration_predictor.int8.onnx",
+                3_700_147L, 3_700_147L,
+                "c3eb91414d5ff8a7a239b7fe9e34e7e2bf8a8140d8375ffb14718b1c639325db"
+            ),
+            ModelAsset(
+                "text_encoder.int8.onnx",
+                UPSTREAM_MODEL_BASE + "text_encoder.int8.onnx",
+                36_416_150L, 36_416_150L,
+                "c7befd5ea8c3119769e8a6c1486c4edc6a3bc8365c67621c881bbb774b9902ff"
+            ),
+            ModelAsset(
+                VECTOR_FILE,
+                OPTIMIZED_VECTOR_URL,
+                0L, MIN_OPTIMIZED_VECTOR_SIZE_BYTES,
+                OPTIMIZED_VECTOR_SHA256
+            ),
+            ModelAsset(
+                "vocoder.int8.onnx",
+                UPSTREAM_MODEL_BASE + "vocoder.int8.onnx",
+                25_991_073L, 25_991_073L,
+                "e923d60f53f95eb1ce235f1dc33ec56d9c057823c96fa6f8acf98f32b0da6152"
+            ),
+            ModelAsset(
+                "tts.json",
+                UPSTREAM_MODEL_BASE + "tts.json",
+                8_253L, 8_253L,
+                "42078d3aef1cd43ab43021f3c54f47d2d75ceb4e75f627f118890128b06a0d09"
+            ),
+            ModelAsset(
+                "unicode_indexer.bin",
+                UPSTREAM_MODEL_BASE + "unicode_indexer.bin",
+                262_144L, 262_144L,
+                "8402ca48e5189a8950138580b0fff64db6f072f24ac07cd54ba8b2fbb9883b30"
+            ),
+            ModelAsset(
+                "voice.bin",
+                UPSTREAM_MODEL_BASE + "voice.bin",
+                517_168L, 517_168L,
+                "67d5209b0ee8ce6c74105ffbe12fe6a7628aea3b4ba2fcb308a4a67938a93ce8"
+            )
+        )
 
         private val requiredModelFiles = listOf(
             "duration_predictor.int8.onnx" to 1_000_000L,
