@@ -41,6 +41,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalLayoutDirection
 import com.sawt.ai.audio.SpeechPlaybackService
 import com.sawt.ai.audio.SupertonicTtsEngine
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -333,6 +334,8 @@ private fun SawtStudio() {
                                     } else {
                                         "تم تجهيز عينة ${selectedVoice.name} خلال ${String.format(Locale.US, "%.1f", elapsedSeconds)} ثانية."
                                     }
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
                                 } catch (error: Exception) {
                                     errorMessage = error.message ?: "تعذّر إكمال عينة الصوت. راجع التفاصيل ثم أعد المحاولة."
                                     status = "يمكنك إعادة تجربة العينة بعد معالجة الملاحظة الموضحة."
@@ -472,6 +475,8 @@ private fun SawtStudio() {
                                                 )
                                                 modelReady = engine.isModelInstalled()
                                                 status = "اكتمل تثبيت الأصوات. يمكنك الآن التحويل دون إنترنت."
+                                            } catch (cancelled: CancellationException) {
+                                                throw cancelled
                                             } catch (error: Exception) {
                                                 errorMessage = error.message ?: "تعذّر إكمال تجهيز الأصوات. راجع التفاصيل ثم أعد المحاولة."
                                                 status = "يمكن متابعة تجهيز الأصوات بعد معالجة الملاحظة الموضحة."
@@ -543,6 +548,8 @@ private fun SawtStudio() {
                                     lastLanguageName = if (requestLanguage == "ar") "العربية" else "English"
                                     SpeechPlaybackService.playFile(context, result.absolutePath)
                                     status = "اكتمل إنشاء الصوت خلال ${formatDuration(elapsedMs)} وبدأ تشغيله."
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
                                 } catch (error: Exception) {
                                     errorMessage = error.message ?: "تعذر إنشاء الصوت."
                                     status = "تحتاج العملية إلى مراجعة بسيطة؛ يمكنك المحاولة بعد معالجة السبب الموضح."
@@ -668,6 +675,8 @@ private fun SawtStudio() {
                                             try {
                                                 val name = withContext(Dispatchers.IO) { saveAudioToDownloads(context, file) }
                                                 status = "تم حفظ $name داخل التنزيلات / SAWT AI."
+                                            } catch (cancelled: CancellationException) {
+                                                throw cancelled
                                             } catch (error: Exception) {
                                                 errorMessage = error.message ?: "تعذر حفظ ملف الصوت."
                                             } finally {
