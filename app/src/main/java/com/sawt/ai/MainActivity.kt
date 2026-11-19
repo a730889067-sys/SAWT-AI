@@ -307,7 +307,7 @@ private fun SawtStudio() {
                             generationStartedAt = previewStartedAt
                             generationElapsedMs = 0L
                             generatedAudioMs = 0L
-                            estimatedTotalMs = estimateGenerationMs(metricsPrefs, previewLanguage, sampleText.length)
+                            estimatedTotalMs = estimateGenerationMs(metricsPrefs, previewLanguage, previewSpeed, sampleText.length)
                             generationStage = "جارٍ تجهيز عينة الصوت…"
                             val previewKey = "$previewLanguage-${previewVoice.speakerId}-${String.format(Locale.US, "%.1f", previewSpeed)}"
                             scope.launch {
@@ -518,7 +518,7 @@ private fun SawtStudio() {
                             generationStartedAt = SystemClock.elapsedRealtime()
                             generationElapsedMs = 0L
                             generatedAudioMs = 0L
-                            estimatedTotalMs = estimateGenerationMs(metricsPrefs, requestLanguage, requestText.length)
+                            estimatedTotalMs = estimateGenerationMs(metricsPrefs, requestLanguage, requestSpeed, requestText.length)
                             generationStage = "جارٍ تجهيز محرك الصوت…"
                             val startedAt = generationStartedAt
                             scope.launch {
@@ -534,7 +534,7 @@ private fun SawtStudio() {
                                     val elapsedMs = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L)
                                     generationElapsedMs = elapsedMs
                                     val sampleRate = elapsedMs.toFloat() / requestText.length.coerceAtLeast(1)
-                                    val prefKey = "generation_ms_per_char_$requestLanguage"
+                                    val prefKey = generationRateKey(requestLanguage, requestSpeed)
                                     val oldRate = metricsPrefs.getFloat(prefKey, 0f)
                                     val smoothRate = if (oldRate > 0f) oldRate * 0.7f + sampleRate * 0.3f else sampleRate
                                     metricsPrefs.edit().putFloat(prefKey, smoothRate).apply()
@@ -844,8 +844,16 @@ private fun formatDuration(milliseconds: Long): String {
     return if (minutes > 0L) "${minutes} د ${remainder} ث" else "${seconds} ث"
 }
 
-private fun estimateGenerationMs(contextPrefs: android.content.SharedPreferences, language: String, characterCount: Int): Long {
-    val averageMsPerCharacter = contextPrefs.getFloat("generation_ms_per_char_$language", 0f)
+private fun generationRateKey(language: String, speed: Float): String =
+    "generation_ms_per_char_${language}_${String.format(Locale.US, "%.1f", speed)}"
+
+private fun estimateGenerationMs(
+    contextPrefs: android.content.SharedPreferences,
+    language: String,
+    speed: Float,
+    characterCount: Int
+): Long {
+    val averageMsPerCharacter = contextPrefs.getFloat(generationRateKey(language, speed), 0f)
     if (averageMsPerCharacter <= 0f || characterCount <= 0) return 0L
     return (averageMsPerCharacter * characterCount).toLong().coerceAtLeast(1_000L)
 }
