@@ -108,6 +108,9 @@ private fun SawtStudio() {
     var lastLanguageName by remember { mutableStateOf("") }
     var saving by remember { mutableStateOf(false) }
     var lastFile by remember { mutableStateOf<File?>(null) }
+    // Reuse short preview WAVs during this app session instead of synthesizing
+    // the same speaker/language/speed combination repeatedly.
+    val previewCache = remember { mutableMapOf<String, File>() }
     var status by remember { mutableStateOf("اكتب نصك، اختر الصوت، ثم أنشئ التسجيل.") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showHelp by remember { mutableStateOf(false) }
@@ -278,25 +281,34 @@ private fun SawtStudio() {
                             previewing = true
                             lastFile = null
                             errorMessage = null
-                            status = "جارٍ إنشاء عينة قصيرة للصوت ${selectedVoice.name}…"
+                            status = "جارٍ تجهيز عينة قصيرة للصوت ${selectedVoice.name}…"
+                            val previewStartedAt = SystemClock.elapsedRealtime()
+                            val previewKey = "$language-${selectedVoice.speakerId}-${String.format(Locale.US, "%.1f", speed)}"
                             scope.launch {
                                 try {
                                     val sampleText = if (language == "ar") {
-                                        "السلام عليكم. هذا نموذج تجريبي لصوت ساوت إيه آي، يمكنك الاستماع إليه قبل تحويل نصك."
+                                        "السلام عليكم، هذا صوت ساوت إيه آي."
                                     } else {
-                                        "Hello. This is a short SAWT AI voice sample. Listen before converting your text."
+                                        "Hello, this is SAWT AI."
                                     }
-                                    val sample = engine.synthesizeToFile(
+                                    val cachedSample = previewCache[previewKey]
+                                        ?.takeIf { it.isFile && it.length() > 44L }
+                                    val sample = cachedSample ?: engine.synthesizeToFile(
                                         text = sampleText,
                                         language = language,
                                         speakerId = selectedVoice.speakerId,
                                         speed = speed
-                                    )
+                                    ).also { previewCache[previewKey] = it }
                                     lastFile = sample
                                     lastVoiceName = selectedVoice.name
                                     lastLanguageName = if (language == "ar") "العربية" else "English"
                                     SpeechPlaybackService.playFile(context, sample.absolutePath)
-                                    status = "تستمع الآن إلى عينة ${selectedVoice.name}. يمكنك حفظها أو اختيار صوت آخر."
+                                    val elapsedSeconds = (SystemClock.elapsedRealtime() - previewStartedAt) / 1000.0
+                                    status = if (cachedSample != null) {
+                                        "عينة ${selectedVoice.name} جاهزة من الذاكرة. بدأ التشغيل فورًا."
+                                    } else {
+                                        "تم تجهيز عينة ${selectedVoice.name} خلال ${String.format(Locale.US, "%.1f", elapsedSeconds)} ثانية."
+                                    }
                                 } catch (error: Exception) {
                                     errorMessage = error.message ?: "تعذر إنشاء عينة الصوت."
                                     status = "لم تكتمل عينة الصوت."
