@@ -99,6 +99,8 @@ private fun SawtStudio() {
     var speed by remember { mutableFloatStateOf(1.0f) }
     var modelReady by remember { mutableStateOf(engine.isModelInstalled()) }
     var modelLoading by remember { mutableStateOf(false) }
+    var modelStartedAt by remember { mutableLongStateOf(0L) }
+    var modelElapsedMs by remember { mutableLongStateOf(0L) }
     var modelProgress by remember { mutableIntStateOf(0) }
     var modelProgressIndeterminate by remember { mutableStateOf(false) }
     var modelStage by remember { mutableStateOf("الأصوات غير مثبتة بعد") }
@@ -131,6 +133,13 @@ private fun SawtStudio() {
     LaunchedEffect(generating, previewing, generationStartedAt) {
         while (generating || previewing) {
             generationElapsedMs = (SystemClock.elapsedRealtime() - generationStartedAt).coerceAtLeast(0L)
+            delay(500)
+        }
+    }
+
+    LaunchedEffect(modelLoading, modelStartedAt) {
+        while (modelLoading) {
+            modelElapsedMs = (SystemClock.elapsedRealtime() - modelStartedAt).coerceAtLeast(0L)
             delay(500)
         }
     }
@@ -325,8 +334,8 @@ private fun SawtStudio() {
                                         "تم تجهيز عينة ${selectedVoice.name} خلال ${String.format(Locale.US, "%.1f", elapsedSeconds)} ثانية."
                                     }
                                 } catch (error: Exception) {
-                                    errorMessage = error.message ?: "تعذر إنشاء عينة الصوت."
-                                    status = "لم تكتمل عينة الصوت."
+                                    errorMessage = error.message ?: "تعذّر إكمال عينة الصوت. راجع التفاصيل ثم أعد المحاولة."
+                                    status = "يمكنك إعادة تجربة العينة بعد معالجة الملاحظة الموضحة."
                                 } finally {
                                     previewing = false
                                 }
@@ -392,7 +401,7 @@ private fun SawtStudio() {
                             Spacer(Modifier.height(6.dp))
                             Text(
                                 if (!modelReady) "تنزيل الأصوات والمحرك المحسّن يحتاج الإنترنت أول مرة. الحجم التقريبي 195 ميجابايت، مع مساحة فارغة تقارب 600 ميجابايت."
-                                else if (engine.needsOptimization()) "الأصوات مثبتة بالفعل. نزّل ملف التحسين مرة واحدة لتسريع التحويل؛ سيبقى المحرك القديم متاحًا إذا تعذّر التحديث."
+                                else if (engine.needsOptimization()) "الأصوات مثبتة بالفعل. نزّل ملف التحسين مرة واحدة لتحسين سرعة التحويل؛ إعدادك الحالي محفوظ أثناء التحديث."
                                 else "العربية والإنجليزية، خمسة أصوات رجالية وخمسة نسائية. المحرك المحسّن يعمل دون إنترنت بعد التثبيت.",
                                 color = TextMuted,
                                 fontSize = 11.sp,
@@ -416,7 +425,8 @@ private fun SawtStudio() {
                                 }
                                 Spacer(Modifier.height(5.dp))
                                 Text(
-                                    if (modelProgressIndeterminate) modelStage else "$modelStage · $modelProgress%",
+                                    (if (modelProgressIndeterminate) modelStage else "$modelStage · $modelProgress%") +
+                                        " · الوقت المنقضي ${formatDuration(modelElapsedMs)}",
                                     color = GoldSoft,
                                     fontSize = 10.sp
                                 )
@@ -425,6 +435,8 @@ private fun SawtStudio() {
                                 Button(
                                     onClick = {
                                         modelLoading = true
+                                        modelStartedAt = SystemClock.elapsedRealtime()
+                                        modelElapsedMs = 0L
                                         modelProgress = 0
                                         modelProgressIndeterminate = false
                                         errorMessage = null
@@ -461,8 +473,8 @@ private fun SawtStudio() {
                                                 modelReady = engine.isModelInstalled()
                                                 status = "اكتمل تثبيت الأصوات. يمكنك الآن التحويل دون إنترنت."
                                             } catch (error: Exception) {
-                                                errorMessage = error.message ?: "تعذر تنزيل الأصوات أو تثبيتها."
-                                                status = "لم يكتمل تثبيت الأصوات."
+                                                errorMessage = error.message ?: "تعذّر إكمال تجهيز الأصوات. راجع التفاصيل ثم أعد المحاولة."
+                                                status = "يمكن متابعة تجهيز الأصوات بعد معالجة الملاحظة الموضحة."
                                             } finally {
                                                 modelLoading = false
                                             }
@@ -487,7 +499,7 @@ private fun SawtStudio() {
 
                     if (errorMessage != null) {
                         Spacer(Modifier.height(10.dp))
-                        Text(errorMessage.orEmpty(), color = Color(0xFFE4A3A3), fontSize = 12.sp, lineHeight = 19.sp)
+                        Text(errorMessage.orEmpty(), color = Color(0xFFE0BD78), fontSize = 12.sp, lineHeight = 19.sp)
                     }
 
                     Spacer(Modifier.height(20.dp))
@@ -705,7 +717,7 @@ private fun SawtStudio() {
                             HelpSection("٦. إنشاء الصوت والاستماع", "بعد كتابة النص واختيار اللغة والصوت، اضغط «إنشاء الصوت والاستماع». سيُنشئ التطبيق ملف WAV على الهاتف ويبدأ تشغيله تلقائيًا. اضغط زر التشغيل الدائري داخل بطاقة الصوت لسماعه مرة أخرى، أو اضغط سهم التنزيل الموجود بجانبه لحفظ الملف.")
                             HelpSection("٧. حفظ الصوت وإيجاده", "بعد الاستماع إلى النتيجة، اضغط سهم التنزيل الموجود بجانب بطاقة الصوت. سيُحفظ الملف بصيغة WAV في تطبيق الملفات داخل: التنزيلات (Download) ثم مجلد SAWT AI. يمكنك فتحه أو مشاركته من هناك.")
                             HelpSection("٨. العمل دون إنترنت والخصوصية", "الإنترنت مطلوب لتنزيل حزمة النماذج أول مرة فقط. بعد اكتمال التثبيت يعمل إنشاء الصوت محليًا على الهاتف دون اتصال، ولا يحتاج إلى خادم مدفوع. لا يرسل التطبيق النص إلى خدمة سحابية أثناء التحويل المحلي.")
-                            HelpSection("٩. عند فشل التنزيل", "تأكد من اتصال الإنترنت ومن وجود مساحة فارغة كافية، ثم اضغط زر التنزيل مرة أخرى. إذا انقطع الاتصال أثناء التنزيل فسيبدأ التنزيل من جديد. لا تحذف بيانات التطبيق أثناء تثبيت الأصوات.")
+                            HelpSection("٩. استكمال التجهيز", "لأفضل نتيجة، استخدم اتصالًا مستقرًا واترك مساحة فارغة كافية. إذا انقطع الاتصال، أعد تشغيل التنزيل؛ وسيعيد التطبيق التحقق من ملفات الأصوات قبل استخدامها.")
                         }
                     },
                     confirmButton = {
