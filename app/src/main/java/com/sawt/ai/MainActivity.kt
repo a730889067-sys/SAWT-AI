@@ -32,6 +32,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.edit
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
@@ -542,7 +543,7 @@ private fun SawtStudio() {
                                     val prefKey = generationRateKey(requestLanguage, requestSpeed)
                                     val oldRate = metricsPrefs.getFloat(prefKey, 0f)
                                     val smoothRate = if (oldRate > 0f) oldRate * 0.7f + sampleRate * 0.3f else sampleRate
-                                    metricsPrefs.edit().putFloat(prefKey, smoothRate).apply()
+                                    metricsPrefs.edit { putFloat(prefKey, smoothRate) }
                                     lastFile = result
                                     lastVoiceName = requestVoice.name
                                     lastLanguageName = if (requestLanguage == "ar") "العربية" else "English"
