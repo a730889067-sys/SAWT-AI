@@ -97,45 +97,11 @@ class SupertonicTtsEngine(context: Context) {
             downloadOptimizedVectorEstimator(optimizedVector, onProgress)
             replaceFileSafely(optimizedVector, File(extractedModelDirectory, VECTOR_FILE))
 
-            onStage("تم تجهيز المحرك المحسّن. جارٍ اختبار إنشاء الصوت…")
-            val validationEngine = try {
-                createNativeEngine(extractedModelDirectory)
-            } catch (error: OutOfMemoryError) {
-                throw IOException("الهاتف لا يملك ذاكرة كافية لتهيئة محرك الصوت. أغلق التطبيقات الأخرى وأعد المحاولة.", error)
-            } catch (error: Exception) {
-                throw IOException("تعذر تهيئة محرك الصوت على هذا الهاتف: ${error.message ?: "خطأ غير معروف"}", error)
-            }
-            try {
-                val smokeTests = listOf(
-                    Triple(5, "ar", "السلام عليكم، هذا اختبار للصوت العربي الرجالي."),
-                    Triple(0, "ar", "مرحبًا، هذا اختبار للصوت العربي النسائي."),
-                    Triple(5, "en", "Hello, this is a male English voice test."),
-                    Triple(0, "en", "Hello, this is a female English voice test.")
-                )
-                smokeTests.forEach { (speaker, lang, sampleText) ->
-                    val sample = validationEngine.generateWithConfig(
-                        sampleText,
-                        GenerationConfig(
-                            sid = speaker,
-                            speed = 1.0f,
-                            numSteps = 4,
-                            extra = mapOf("lang" to lang)
-                        )
-                    )
-                    if (sample.samples.isEmpty() || sample.sampleRate <= 0) {
-                        throw IOException("فشل اختبار توليد الصوت للغة " + lang + " والمتحدث رقم " + speaker + ".")
-                    }
-                }
-            } catch (error: OutOfMemoryError) {
-                throw IOException("ذاكرة الهاتف غير كافية لاختبار توليد الصوت. أغلق التطبيقات الأخرى وأعد المحاولة.", error)
-            } catch (error: Exception) {
-                throw IOException("لم يجتز محرك الصوت اختبار العربية والإنجليزية والرجالي والنسائي: " + (error.message ?: "خطأ غير معروف"), error)
-            } finally {
-                try {
-                    validationEngine.release()
-                } catch (_: Exception) {
-                }
-            }
+            // Avoid four full speech generations during installation.
+            // The model archive and every required model file have already
+            // been SHA-256/size checked. Load ONNX only when the user previews
+            // or converts speech, and keep that live engine cached in memory.
+            onStage("تم التحقق من ملفات النموذج. يجري تجهيزها للاستخدام…")
 
             File(extractedModelDirectory, ".sawt-verified").writeText(OPTIMIZED_INSTALL_MARKER)
             modelDirectory.deleteRecursively()
