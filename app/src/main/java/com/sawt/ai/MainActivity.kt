@@ -846,23 +846,17 @@ private fun saveAudioToDownloads(context: Context, source: File): String {
 }
 
 
-private fun formatDuration(milliseconds: Long): String {
-    val seconds = (milliseconds / 1_000L).coerceAtLeast(0L)
-    val minutes = seconds / 60L
-    val remainder = seconds % 60L
-    return if (minutes > 0L) "${minutes} د ${remainder} ث" else "${seconds} ث"
-}
+private fun formatDuration(milliseconds: Long): String = GenerationProgress.formatDuration(milliseconds)
 
 private fun generationRateKey(language: String, speed: Float): String =
-    "generation_ms_per_char_${language}_${String.format(Locale.US, "%.1f", speed)}"
+    GenerationProgress.rateKey(language, speed)
 
 private fun estimateGenerationMs(
     contextPrefs: android.content.SharedPreferences,
     language: String,
     speed: Float,
     characterCount: Int
-): Long {
-    val averageMsPerCharacter = contextPrefs.getFloat(generationRateKey(language, speed), 0f)
-    if (averageMsPerCharacter <= 0f || characterCount <= 0) return 0L
-    return (averageMsPerCharacter * characterCount).toLong().coerceAtLeast(1_000L)
-}
+): Long = GenerationProgress.estimateMs(
+    contextPrefs.getFloat(generationRateKey(language, speed), 0f),
+    characterCount
+)
