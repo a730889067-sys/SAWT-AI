@@ -74,8 +74,8 @@ class SupertonicTtsEngine(context: Context) {
 
         try {
             downloadArchive(archive, onProgress)
-            onStage("تم التنزيل. جارٍ التحقق من سلامة الملف…")
-            val actualSha = sha256(archive)
+            onStage("جارٍ فحص سلامة حزمة الأصوات…")
+            val actualSha = sha256(archive, onProgress)
             if (!actualSha.equals(ARCHIVE_SHA256, ignoreCase = true)) {
                 throw IOException("فشل التحقق من بصمة الملف. حُذفت النسخة غير السليمة؛ أعد المحاولة.")
             }
@@ -122,7 +122,9 @@ class SupertonicTtsEngine(context: Context) {
         text: String,
         language: String,
         speakerId: Int,
-        speed: Float
+        speed: Float,
+        onStage: (String) -> Unit = {},
+        onProgress: (generatedAudioMs: Long) -> Unit = {}
     ): File = withContext(Dispatchers.IO) {
         val spokenText = text.trim()
         if (spokenText.isEmpty()) throw IOException("اكتب النص أولًا.")
@@ -134,6 +136,7 @@ class SupertonicTtsEngine(context: Context) {
         if (!isModelInstalled()) throw IOException("نزّل حزمة الأصوات أولًا.")
 
         val engine = nativeTts ?: try {
+            onStage("جارٍ تجهيز محرك الصوت على الهاتف…")
             createNativeEngine().also { nativeTts = it }
         } catch (error: OutOfMemoryError) {
             close()
@@ -147,8 +150,15 @@ class SupertonicTtsEngine(context: Context) {
             numSteps = 4,
             extra = mapOf("lang" to language)
         )
+        onStage("جارٍ توليد الصوت…")
+        var generatedSamples = 0L
+        val sampleRate = engine.sampleRate().coerceAtLeast(1)
         val audio = try {
-            engine.generateWithConfig(spokenText, config)
+            engine.generateWithConfigAndCallback(spokenText, config) { samples ->
+                generatedSamples += samples.size.toLong()
+                onProgress(generatedSamples * 1_000L / sampleRate)
+                1
+            }
         } catch (error: OutOfMemoryError) {
             close()
             throw IOException("ذاكرة الهاتف لم تكفِ لإنشاء هذا المقطع. جرّب نصًا أقصر وأغلق التطبيقات الأخرى.", error)
@@ -157,6 +167,7 @@ class SupertonicTtsEngine(context: Context) {
             throw IOException("لم ينتج محرك الصوت ملفًا صالحًا. جرّب نصًا أقصر.")
         }
 
+        onStage("اكتمل توليد المقطع. جارٍ حفظ ملف الصوت…")
         val output = File(appContext.cacheDir, "sawt-${System.currentTimeMillis()}.wav")
         if (!audio.save(output.absolutePath) || !output.isFile || output.length() < 44L) {
             output.delete()
@@ -317,6 +328,9 @@ class SupertonicTtsEngine(context: Context) {
         val canonicalRoot = destinationRoot.canonicalFile
         var expandedBytes = 0L
         var filesWritten = 0
+        var completedRequiredFiles = 0
+        val requiredNames = requiredModelFiles.map { it.first }.toSet()
+        onStage("جارٍ فك ضغط ملفات الأصوات (0/${requiredModelFiles.size})…")
         BZip2CompressorInputStream(BufferedInputStream(FileInputStream(archive)), true).use { bzip ->
             TarArchiveInputStream(bzip).use { tar ->
                 while (true) {
@@ -348,22 +362,30 @@ class SupertonicTtsEngine(context: Context) {
                             }
                         }
                         filesWritten++
+                        if (File(entry.name).name in requiredNames) {
+                            completedRequiredFiles++
+                            onStage("جارٍ فك ضغط ملفات الأصوات (${completedRequiredFiles.coerceAtMost(requiredModelFiles.size)}/${requiredModelFiles.size})…")
+                        }
                     }
                 }
             }
         }
         if (filesWritten < requiredModelFiles.size) throw IOException("لم تكتمل ملفات النموذج أثناء التثبيت.")
-        onStage("اكتمل فك ضغط ملفات الأصوات والتحقق منها.")
+        onStage("اكتمل فك ضغط ملفات الأصوات (${requiredModelFiles.size}/${requiredModelFiles.size}).")
     }
 
-    private fun sha256(file: File): String {
+    private fun sha256(file: File, onProgress: (Long, Long) -> Unit): String {
         val digest = MessageDigest.getInstance("SHA-256")
+        val totalBytes = file.length().coerceAtLeast(1L)
+        var processedBytes = 0L
         FileInputStream(file).use { input ->
             val buffer = ByteArray(128 * 1024)
             while (true) {
                 val count = input.read(buffer)
                 if (count < 0) break
                 digest.update(buffer, 0, count)
+                processedBytes += count
+                onProgress(processedBytes, totalBytes)
             }
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
