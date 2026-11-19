@@ -78,7 +78,6 @@ class SupertonicTtsEngine(context: Context) {
         File(modelsRoot, ".supertonic-installing").deleteRecursively()
         File(modelsRoot, ".supertonic-previous").deleteRecursively()
         File(appContext.cacheDir, "vector_estimator.mobile.tmp").delete()
-        File(appContext.cacheDir, "vector_estimator.mobile.tmp").delete()
 
         val stagingRoot = File(modelsRoot, ".supertonic-installing")
         val backupRoot = File(modelsRoot, ".supertonic-previous")
@@ -184,6 +183,7 @@ class SupertonicTtsEngine(context: Context) {
         close()
         modelsRoot.deleteRecursively()
         File(appContext.cacheDir, "$MODEL_DIRECTORY.tar.bz2").delete()
+        File(appContext.cacheDir, "vector_estimator.mobile.tmp").delete()
     }
 
     fun close() {
