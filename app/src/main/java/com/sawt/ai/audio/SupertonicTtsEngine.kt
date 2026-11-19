@@ -190,10 +190,11 @@ class SupertonicTtsEngine(context: Context) {
             ttsJson = "tts.json",
             unicodeIndexer = "unicode_indexer.bin",
             voiceStyle = "voice.bin",
-            // Keep ONNX CPU workers bounded on low-memory Android phones.
-            // More workers can multiply intermediate tensor buffers and trigger
-            // memory pressure on devices with only 2 GB RAM.
-            numThreads = Runtime.getRuntime().availableProcessors().coerceIn(1, 2)
+            // Use up to four CPU workers: the mobile-optimized vector estimator
+            // rewrites pointwise Conv1d layers as MatMul so ONNX Runtime can
+            // parallelize them across cores. Four workers are a compromise
+            // for 2 GB Android devices; never exceed the cores reported by Android.
+            numThreads = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
         )
         return OfflineTts(config = config)
     }
