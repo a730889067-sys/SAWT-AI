@@ -16,6 +16,7 @@ import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -49,6 +50,9 @@ class SupertonicTtsEngine(context: Context) {
     @Volatile
     private var nativeTts: OfflineTts? = null
 
+    @Volatile
+    private var modelIntegrityVerified = false
+
     fun isModelInstalled(): Boolean = isInstalledDirectory(modelDirectory)
 
     fun needsOptimization(): Boolean = isModelInstalled() &&
@@ -68,6 +72,35 @@ class SupertonicTtsEngine(context: Context) {
         } catch (_: Exception) {
             false
         }
+    }
+
+    private fun verifyInstalledModelIntegrity(onStage: (String) -> Unit) {
+        if (modelIntegrityVerified) return
+        MODEL_ASSETS.forEach { asset ->
+            onStage("جارٍ التحقق من سلامة ${asset.fileName}…")
+            val file = File(modelDirectory, asset.fileName)
+            if (!file.isFile || file.length() < asset.minimumBytes) {
+                throw IOException("ملف الصوت ${asset.fileName} غير مكتمل. احذف حزمة الأصوات وأعد تنزيلها.")
+            }
+            val actualSha = calculateSha256(file)
+            if (!actualSha.equals(asset.sha256, ignoreCase = true)) {
+                throw IOException("فشل التحقق من سلامة ${asset.fileName}. احذف حزمة الأصوات وأعد تنزيلها.")
+            }
+        }
+        modelIntegrityVerified = true
+    }
+
+    private fun calculateSha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        BufferedInputStream(FileInputStream(file)).use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }
 
     private fun recoverInterruptedInstall() {
@@ -162,6 +195,7 @@ class SupertonicTtsEngine(context: Context) {
                         throw IOException("تعذر اعتماد ملفات الصوت بعد التحقق منها.")
                     }
                     backupRoot.deleteRecursively()
+                    modelIntegrityVerified = true
                     onStage("اكتمل تثبيت الأصوات العشرة. يمكنك الآن العمل دون إنترنت.")
                 } catch (error: OutOfMemoryError) {
                     stagingRoot.deleteRecursively()
@@ -200,6 +234,7 @@ class SupertonicTtsEngine(context: Context) {
                 if (speakerId !in 0..9) throw IOException("اختيار الصوت غير صالح.")
                 if (!speed.isFinite()) throw IOException("سرعة القراءة غير صالحة.")
                 if (!isModelInstalled()) throw IOException("نزّل حزمة الأصوات أولًا.")
+                verifyInstalledModelIntegrity(onStage)
 
                 val engine = try {
                     getOrCreateNativeEngine()
@@ -286,6 +321,7 @@ class SupertonicTtsEngine(context: Context) {
             throw IllegalStateException("لا يمكن حذف الأصوات أثناء وجود عملية قيد التنفيذ.")
         }
         releaseNativeEngine()
+        modelIntegrityVerified = false
         modelsRoot.deleteRecursively()
         File(appContext.cacheDir, "$MODEL_DIRECTORY.tar.bz2").delete()
         File(appContext.cacheDir, "vector_estimator.mobile.tmp").delete()
@@ -366,6 +402,7 @@ class SupertonicTtsEngine(context: Context) {
             releaseNativeEngine()
             replaceFileSafely(optimizedVector, File(modelDirectory, VECTOR_FILE))
             File(modelDirectory, ".sawt-verified").writeText(OPTIMIZED_INSTALL_MARKER)
+            modelIntegrityVerified = false
         } catch (error: Exception) {
             optimizedVector.delete()
             throw error
@@ -410,7 +447,7 @@ class SupertonicTtsEngine(context: Context) {
             if (downloaded < MIN_OPTIMIZED_VECTOR_SIZE_BYTES) {
                 throw IOException("ملف تحسين الصوت غير مكتمل. أعد المحاولة.")
             }
-            val actualSha = digest.digest().joinToString("") { "%02x".format(it) }
+            val actualSha = digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
             if (!actualSha.equals(OPTIMIZED_VECTOR_SHA256, ignoreCase = true)) {
                 throw IOException("فشل التحقق من بصمة تحسين الصوت. لم يتم استبدال النموذج.")
             }
@@ -483,7 +520,7 @@ class SupertonicTtsEngine(context: Context) {
             if (asset.expectedBytes > 0L && downloaded != asset.expectedBytes) {
                 throw IOException("حجم ${asset.fileName} لا يطابق الحجم المتوقع. أُوقف التثبيت.")
             }
-            val actualSha = digest.digest().joinToString("") { "%02x".format(it) }
+            val actualSha = digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
             if (!actualSha.equals(asset.sha256, ignoreCase = true)) {
                 throw IOException("فشل فحص سلامة ${asset.fileName}. لم يتم تثبيت الملف.")
             }
