@@ -7,7 +7,10 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.media.AudioAttributes
 import android.media.MediaPlayer
+import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.sawt.ai.MainActivity
@@ -26,58 +29,113 @@ class SpeechPlaybackService : Service() {
             ACTION_STOP -> {
                 releasePlayer()
                 stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                stopSelfResult(startId)
             }
             ACTION_PLAY_FILE -> {
                 val path = intent.getStringExtra(EXTRA_FILE).orEmpty()
                 if (path.isBlank()) {
-                    stopSelf()
+                    stopSelfResult(startId)
                     return START_NOT_STICKY
                 }
-                startForeground(NOTIFICATION_ID, notification())
-                playFile(path)
+                try {
+                    startPlaybackForeground()
+                    playFile(path, startId)
+                } catch (_: Exception) {
+                    releasePlayer()
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelfResult(startId)
+                } catch (_: LinkageError) {
+                    releasePlayer()
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelfResult(startId)
+                }
             }
-            else -> stopSelf()
+            else -> {
+                releasePlayer()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelfResult(startId)
+            }
         }
         return START_NOT_STICKY
     }
 
-    private fun playFile(path: String) {
+    private fun startPlaybackForeground() {
+        val foregroundNotification = notification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                foregroundNotification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, foregroundNotification)
+        }
+    }
+
+    private fun playFile(path: String, requestStartId: Int) {
         releasePlayer()
-        player = MediaPlayer().apply {
-            setOnPreparedListener { it.start() }
-            setOnCompletionListener {
-                it.release()
-                if (player === it) player = null
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+        val mediaPlayer = MediaPlayer()
+        player = mediaPlayer
+        try {
+            mediaPlayer.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            mediaPlayer.setOnPreparedListener { prepared ->
+                if (player === prepared) {
+                    try {
+                        prepared.start()
+                    } catch (_: Exception) {
+                        releasePlayer()
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelfResult(requestStartId)
+                    }
+                } else {
+                    try { prepared.release() } catch (_: Exception) { }
+                }
             }
-            setOnErrorListener { mp, _, _ ->
-                mp.release()
-                if (player === mp) player = null
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+            mediaPlayer.setOnCompletionListener { completed ->
+                if (player === completed) {
+                    player = null
+                    try { completed.release() } catch (_: Exception) { }
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelfResult(requestStartId)
+                }
+            }
+            mediaPlayer.setOnErrorListener { failed, _, _ ->
+                if (player === failed) {
+                    player = null
+                    try { failed.release() } catch (_: Exception) { }
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelfResult(requestStartId)
+                }
                 true
             }
-            try {
-                setDataSource(path)
-                prepareAsync()
-            } catch (_: Exception) {
-                release()
-                player = null
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
-            }
+            mediaPlayer.setDataSource(path)
+            mediaPlayer.prepareAsync()
+        } catch (_: Exception) {
+            if (player === mediaPlayer) player = null
+            try { mediaPlayer.release() } catch (_: Exception) { }
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelfResult(requestStartId)
+        } catch (_: LinkageError) {
+            if (player === mediaPlayer) player = null
+            try { mediaPlayer.release() } catch (_: Exception) { }
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelfResult(requestStartId)
         }
     }
 
     private fun releasePlayer() {
-        val current = player
+        val current = player ?: return
         player = null
-        if (current != null) {
-            try { current.stop() } catch (_: Exception) { }
-            try { current.release() } catch (_: Exception) { }
-        }
+        try { current.setOnPreparedListener(null) } catch (_: Exception) { }
+        try { current.setOnCompletionListener(null) } catch (_: Exception) { }
+        try { current.setOnErrorListener(null) } catch (_: Exception) { }
+        try { current.stop() } catch (_: Exception) { }
+        try { current.release() } catch (_: Exception) { }
     }
 
     private fun notification(): Notification {
