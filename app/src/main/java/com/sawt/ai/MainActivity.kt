@@ -110,7 +110,6 @@ private fun SawtStudio() {
     var previewing by remember { mutableStateOf(false) }
     var generationStartedAt by remember { mutableLongStateOf(0L) }
     var generationElapsedMs by remember { mutableLongStateOf(0L) }
-    var generatedAudioMs by remember { mutableLongStateOf(0L) }
     var estimatedTotalMs by remember { mutableLongStateOf(0L) }
     var generationStage by remember { mutableStateOf("جارٍ تجهيز الصوت…") }
     var lastVoiceName by remember { mutableStateOf("") }
@@ -308,7 +307,6 @@ private fun SawtStudio() {
                             val previewStartedAt = SystemClock.elapsedRealtime()
                             generationStartedAt = previewStartedAt
                             generationElapsedMs = 0L
-                            generatedAudioMs = 0L
                             estimatedTotalMs = estimateGenerationMs(metricsPrefs, previewLanguage, previewSpeed, sampleText.length)
                             generationStage = "جارٍ تجهيز عينة الصوت…"
                             val previewKey = "$previewLanguage-${previewVoice.speakerId}-${String.format(Locale.US, "%.1f", previewSpeed)}"
@@ -322,7 +320,6 @@ private fun SawtStudio() {
                                         speakerId = previewVoice.speakerId,
                                         speed = previewSpeed,
                                         onStage = { stage -> mainHandler.post { generationStage = stage } },
-                                        onProgress = { audioMs -> mainHandler.post { generatedAudioMs = audioMs } }
                                     ).also { previewCache[previewKey] = it }
                                     lastFile = sample
                                     lastVoiceName = selectedVoice.name
@@ -523,7 +520,6 @@ private fun SawtStudio() {
                             status = "جارٍ إنشاء الصوت على الهاتف…"
                             generationStartedAt = SystemClock.elapsedRealtime()
                             generationElapsedMs = 0L
-                            generatedAudioMs = 0L
                             estimatedTotalMs = estimateGenerationMs(metricsPrefs, requestLanguage, requestSpeed, requestText.length)
                             generationStage = "جارٍ تجهيز محرك الصوت…"
                             val startedAt = generationStartedAt
@@ -535,7 +531,6 @@ private fun SawtStudio() {
                                         speakerId = requestVoice.speakerId,
                                         speed = requestSpeed,
                                         onStage = { stage -> mainHandler.post { generationStage = stage } },
-                                        onProgress = { audioMs -> mainHandler.post { generatedAudioMs = audioMs } }
                                     )
                                     val elapsedMs = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L)
                                     generationElapsedMs = elapsedMs
@@ -605,8 +600,7 @@ private fun SawtStudio() {
                                 )
                                 Spacer(Modifier.height(8.dp))
                                 Text(
-                                    if (generatedAudioMs > 0L) "تم توليد ${formatDuration(generatedAudioMs)} من الصوت حتى الآن."
-                                    else generationStage,
+                                    generationStage,
                                     color = TextMain,
                                     fontSize = 11.sp
                                 )

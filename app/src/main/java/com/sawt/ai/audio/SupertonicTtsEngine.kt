@@ -1,10 +1,12 @@
 package com.sawt.ai.audio
 
+import android.app.ActivityManager
 import android.content.Context
 import android.os.StatFs
 import com.k2fsa.sherpa.onnx.GenerationConfig
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.getOfflineTtsConfig
+import com.sawt.ai.audio.DeviceTuning
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
@@ -126,8 +128,7 @@ class SupertonicTtsEngine(context: Context) {
         language: String,
         speakerId: Int,
         speed: Float,
-        onStage: (String) -> Unit = {},
-        onProgress: (generatedAudioMs: Long) -> Unit = {}
+        onStage: (String) -> Unit = {}
     ): File = withContext(Dispatchers.IO) {
         val spokenText = text.trim()
         if (spokenText.isEmpty()) throw IOException("اكتب النص أولًا.")
@@ -154,14 +155,11 @@ class SupertonicTtsEngine(context: Context) {
             extra = mapOf("lang" to language)
         )
         onStage("جارٍ توليد الصوت…")
-        var generatedSamples = 0L
-        val sampleRate = engine.sampleRate().coerceAtLeast(1)
+        // Avoid the JNI progress-callback path on Android. Some Sherpa-ONNX
+        // callback paths have been reported to terminate the process with SIGABRT.
+        // This plain API runs on Dispatchers.IO and keeps UI progress indeterminate.
         val audio = try {
-            engine.generateWithConfigAndCallback(spokenText, config) { samples ->
-                generatedSamples += samples.size.toLong()
-                onProgress(generatedSamples * 1_000L / sampleRate)
-                1
-            }
+            engine.generateWithConfig(spokenText, config)
         } catch (error: OutOfMemoryError) {
             close()
             throw IOException("ذاكرة الهاتف لم تكفِ لإنشاء هذا المقطع. جرّب نصًا أقصر وأغلق التطبيقات الأخرى.", error)
@@ -194,6 +192,18 @@ class SupertonicTtsEngine(context: Context) {
         nativeTts = null
     }
 
+    private fun recommendedNumThreads(): Int {
+        val activityManager =
+            appContext.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        val memoryInfo = ActivityManager.MemoryInfo()
+        activityManager?.getMemoryInfo(memoryInfo)
+        return DeviceTuning.recommendedCpuThreads(
+            totalMemoryBytes = memoryInfo.totalMem,
+            lowRamDevice = activityManager?.isLowRamDevice == true,
+            availableProcessors = Runtime.getRuntime().availableProcessors()
+        )
+    }
+
     private fun createNativeEngine(directory: File = modelDirectory): OfflineTts {
         val config = getOfflineTtsConfig(
             modelDir = directory.absolutePath,
@@ -205,11 +215,9 @@ class SupertonicTtsEngine(context: Context) {
             ttsJson = "tts.json",
             unicodeIndexer = "unicode_indexer.bin",
             voiceStyle = "voice.bin",
-            // Use up to four CPU workers: the mobile-optimized vector estimator
-            // rewrites pointwise Conv1d layers as MatMul so ONNX Runtime can
-            // parallelize them across cores. Four workers are a compromise
-            // for 2 GB Android devices; never exceed the cores reported by Android.
-            numThreads = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
+            // Use one worker on low-memory devices (including typical 2 GB phones),
+            // and at most two workers elsewhere to reduce peak native RAM use.
+            numThreads = recommendedNumThreads()
         )
         return OfflineTts(config = config)
     }
