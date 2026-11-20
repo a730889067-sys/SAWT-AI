@@ -104,6 +104,7 @@ class SupertonicTtsEngine(context: Context) {
     }
 
     private fun recoverInterruptedInstall() {
+        modelIntegrityVerified = false
         val backupRoot = File(modelsRoot, ".supertonic-previous")
         if (backupRoot.exists()) {
             val primaryValid = isInstalledDirectory(modelDirectory)
