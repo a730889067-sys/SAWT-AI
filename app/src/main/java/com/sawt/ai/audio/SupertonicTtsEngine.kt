@@ -42,7 +42,7 @@ class SupertonicTtsEngine(context: Context) {
     private val appContext = context.applicationContext
     private val modelsRoot = File(appContext.filesDir, "sawt-models")
     private val modelDirectory = File(modelsRoot, MODEL_DIRECTORY)
-    private val operationMutex = Mutex()
+    private val operationMutex = processOperationMutex
     private val nativeEngineLock = Any()
     private val activeSynthesisCount = AtomicInteger(0)
     private val closeRequested = AtomicBoolean(false)
@@ -540,6 +540,10 @@ class SupertonicTtsEngine(context: Context) {
     }
 
     companion object {
+        // Prevent duplicate native model instances from synthesizing concurrently
+        // when Android recreates the Activity or Compose screen.
+        private val processOperationMutex = Mutex()
+
         const val MODEL_DIRECTORY = "sherpa-onnx-supertonic-3-tts-int8-2026-05-11"
         private const val MAX_TEXT_CHARACTERS = 2_000
         private const val MAX_TEXT_BYTES = 5_000
