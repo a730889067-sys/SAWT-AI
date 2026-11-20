@@ -48,6 +48,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
 import java.util.Locale
 
 private val Background = Color(0xFF070707)
@@ -59,6 +60,7 @@ private val TextMain = Color(0xFFF5F1E8)
 private val TextMuted = Color(0xFF9B978E)
 private val Border = Color(0xFF302B22)
 private const val MAX_TEXT_CHARS = 2_000
+private const val MAX_PREVIEW_CACHE_ENTRIES = 6
 
 private data class VoiceStyle(
     val name: String,
@@ -118,7 +120,8 @@ private fun SawtStudio() {
     var lastFile by remember { mutableStateOf<File?>(null) }
     // Reuse short preview WAVs during this app session instead of synthesizing
     // the same speaker/language/speed combination repeatedly.
-    val previewCache = remember { mutableMapOf<String, File>() }
+    val previewCache = remember { java.util.LinkedHashMap<String, File>(8, 0.75f, true) }
+    val controlsLocked = modelLoading || generating || previewing
     val metricsPrefs = remember(context) {
         context.getSharedPreferences("sawt_generation_metrics", Context.MODE_PRIVATE)
     }
@@ -142,6 +145,15 @@ private fun SawtStudio() {
         while (modelLoading) {
             modelElapsedMs = (SystemClock.elapsedRealtime() - modelStartedAt).coerceAtLeast(0L)
             delay(500)
+        }
+    }
+
+    LaunchedEffect(context) {
+        withContext(Dispatchers.IO) {
+            val staleBefore = System.currentTimeMillis() - 7L * 24L * 60L * 60L * 1_000L
+            context.cacheDir.listFiles()
+                ?.filter { it.isFile && it.name.startsWith("sawt-") && it.extension.equals("wav", true) && it.lastModified() < staleBefore }
+                ?.forEach { it.delete() }
         }
     }
 
@@ -210,6 +222,7 @@ private fun SawtStudio() {
                     ) {
                         OutlinedTextField(
                             value = input,
+                            enabled = !controlsLocked,
                             onValueChange = { next ->
                                 if (next.length <= MAX_TEXT_CHARS && next.toByteArray(Charsets.UTF_8).size <= 5000) {
                                     input = next
@@ -244,20 +257,20 @@ private fun SawtStudio() {
                                 "Welcome to SAWT AI. Type your text, choose a voice, and listen to the result."
                             }
                             lastFile = null
-                        }) { Text("نص تجريبي", color = GoldSoft) }
-                        TextButton(onClick = { input = ""; lastFile = null }) { Text("مسح النص", color = TextMuted) }
+                        }, enabled = !controlsLocked) { Text("نص تجريبي", color = GoldSoft) }
+                        TextButton(onClick = { input = ""; lastFile = null }, enabled = !controlsLocked) { Text("مسح النص", color = TextMuted) }
                     }
 
                     Spacer(Modifier.height(17.dp))
                     Text("٢. اختر لغة النص", color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(9.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                        LanguageButton("العربية", language == "ar", Modifier.weight(1f)) {
+                        LanguageButton("العربية", language == "ar", Modifier.weight(1f), enabled = !controlsLocked) {
                             language = "ar"
                             input = ""
                             lastFile = null
                         }
-                        LanguageButton("English", language == "en", Modifier.weight(1f)) {
+                        LanguageButton("English", language == "en", Modifier.weight(1f), enabled = !controlsLocked) {
                             language = "en"
                             input = ""
                             lastFile = null
@@ -273,7 +286,7 @@ private fun SawtStudio() {
                     Spacer(Modifier.height(7.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                         maleVoices.forEach { voice ->
-                            VoiceChoice(voice, selectedVoice.name == voice.name, Modifier.weight(1f)) {
+                            VoiceChoice(voice, selectedVoice.name == voice.name, Modifier.weight(1f), enabled = !controlsLocked) {
                                 selectedVoice = voice
                             }
                         }
@@ -283,7 +296,7 @@ private fun SawtStudio() {
                     Spacer(Modifier.height(7.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                         femaleVoices.forEach { voice ->
-                            VoiceChoice(voice, selectedVoice.name == voice.name, Modifier.weight(1f)) {
+                            VoiceChoice(voice, selectedVoice.name == voice.name, Modifier.weight(1f), enabled = !controlsLocked) {
                                 selectedVoice = voice
                             }
                         }
@@ -320,10 +333,18 @@ private fun SawtStudio() {
                                         speakerId = previewVoice.speakerId,
                                         speed = previewSpeed,
                                         onStage = { stage -> mainHandler.post { generationStage = stage } },
-                                    ).also { previewCache[previewKey] = it }
+                                    ).also {
+                                        previewCache[previewKey] = it
+                                        while (previewCache.size > MAX_PREVIEW_CACHE_ENTRIES) {
+                                            val eldest = previewCache.entries.iterator()
+                                            if (!eldest.hasNext()) break
+                                            eldest.next()
+                                            eldest.remove()
+                                        }
+                                    }
                                     lastFile = sample
-                                    lastVoiceName = selectedVoice.name
-                                    lastLanguageName = if (language == "ar") "العربية" else "English"
+                                    lastVoiceName = previewVoice.name
+                                    lastLanguageName = if (previewLanguage == "ar") "العربية" else "English"
                                     SpeechPlaybackService.playFile(context, sample.absolutePath)
                                     generationElapsedMs = SystemClock.elapsedRealtime() - previewStartedAt
                                     val elapsedSeconds = generationElapsedMs / 1000.0
@@ -365,6 +386,7 @@ private fun SawtStudio() {
                         onValueChange = { speed = it },
                         valueRange = 0.8f..1.2f,
                         steps = 3,
+                        enabled = !controlsLocked,
                         colors = SliderDefaults.colors(thumbColor = Gold, activeTrackColor = Gold, inactiveTrackColor = SurfaceRaised)
                     )
                     Text("وضع التحويل", color = TextMuted, fontSize = 12.sp)
@@ -493,7 +515,10 @@ private fun SawtStudio() {
                                 }
                             } else {
                                 Spacer(Modifier.height(5.dp))
-                                TextButton(onClick = { showDeleteConfirmation = true }) {
+                                TextButton(
+                                    onClick = { showDeleteConfirmation = true },
+                                    enabled = !controlsLocked && !saving
+                                ) {
                                     Text("حذف حزمة الأصوات من الهاتف", color = TextMuted, fontSize = 11.sp)
                                 }
                             }
@@ -738,12 +763,20 @@ private fun SawtStudio() {
                     text = { Text("سيتم حذف ملفات النماذج من الهاتف. ستحتاج إلى الإنترنت لتنزيلها مرة أخرى قبل استخدام التحويل المحلي.", color = TextMain) },
                     confirmButton = {
                         TextButton(onClick = {
-                            engine.deleteDownloadedModels()
-                            modelReady = false
-                            lastFile = null
-                            showDeleteConfirmation = false
-                            status = "تم حذف حزمة الأصوات من الهاتف."
-                        }) { Text("حذف", color = Color(0xFFE4A3A3)) }
+                            if (controlsLocked || saving) {
+                                showDeleteConfirmation = false
+                                return@TextButton
+                            }
+                            try {
+                                engine.deleteDownloadedModels()
+                                modelReady = false
+                                lastFile = null
+                                showDeleteConfirmation = false
+                                status = "تم حذف حزمة الأصوات من الهاتف."
+                            } catch (error: Exception) {
+                                errorMessage = error.message ?: "تعذر حذف حزمة الأصوات."
+                            }
+                        }, enabled = !controlsLocked && !saving) { Text("حذف", color = Color(0xFFE4A3A3)) }
                     },
                     dismissButton = {
                         TextButton(onClick = { showDeleteConfirmation = false }) { Text("إلغاء", color = Gold) }
@@ -755,9 +788,10 @@ private fun SawtStudio() {
 }
 
 @Composable
-private fun LanguageButton(label: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun LanguageButton(label: String, selected: Boolean, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
     OutlinedButton(
         onClick = onClick,
+        enabled = enabled,
         modifier = modifier.height(46.dp),
         colors = ButtonDefaults.outlinedButtonColors(
             containerColor = if (selected) Color(0xFF211C13) else SurfaceDark,
@@ -769,12 +803,12 @@ private fun LanguageButton(label: String, selected: Boolean, modifier: Modifier 
 }
 
 @Composable
-private fun VoiceChoice(voice: VoiceStyle, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun VoiceChoice(voice: VoiceStyle, selected: Boolean, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
     Surface(
         color = if (selected) Color(0xFF211C13) else SurfaceDark,
         shape = RoundedCornerShape(12.dp),
         border = BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) Gold else Border),
-        modifier = modifier.height(62.dp).clickable(onClick = onClick)
+        modifier = modifier.height(62.dp).clickable(enabled = enabled, onClick = onClick)
     ) {
         Column(
             modifier = Modifier.fillMaxSize().padding(vertical = 8.dp),
@@ -812,6 +846,9 @@ private fun HelpSection(title: String, body: String) {
 }
 
 private fun saveAudioToDownloads(context: Context, source: File): String {
+    if (!source.isFile || source.length() < 44L) {
+        throw IOException("ملف الصوت غير موجود أو غير مكتمل.")
+    }
     val filename = "SAWT-${System.currentTimeMillis()}.wav"
     if (Build.VERSION.SDK_INT >= 29) {
         val values = ContentValues().apply {
@@ -820,22 +857,39 @@ private fun saveAudioToDownloads(context: Context, source: File): String {
             put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/SAWT AI")
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
-        val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-            ?: error("تعذر إنشاء ملف التنزيل")
+        val resolver = context.contentResolver
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            ?: throw IOException("تعذر إنشاء ملف التنزيل.")
         try {
-            context.contentResolver.openOutputStream(uri)?.use { output ->
-                source.inputStream().use { it.copyTo(output) }
-            } ?: error("تعذر كتابة ملف الصوت")
-            values.clear()
-            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
-            context.contentResolver.update(uri, values, null, null)
+            val output = resolver.openOutputStream(uri, "w")
+                ?: throw IOException("تعذر فتح ملف التنزيل للكتابة.")
+            output.use { stream ->
+                source.inputStream().use { input -> input.copyTo(stream) }
+            }
+            val ready = ContentValues().apply {
+                put(MediaStore.MediaColumns.IS_PENDING, 0)
+            }
+            if (resolver.update(uri, ready, null, null) <= 0) {
+                throw IOException("تعذر إكمال حفظ ملف الصوت.")
+            }
         } catch (error: Exception) {
-            context.contentResolver.delete(uri, null, null)
+            resolver.delete(uri, null, null)
             throw error
         }
     } else {
-        val folder = File(context.getExternalFilesDir(Environment.DIRECTORY_MUSIC), "SAWT AI").apply { mkdirs() }
-        source.copyTo(File(folder, filename), overwrite = true)
+        val baseFolder = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+            ?: throw IOException("مساحة التنزيلات الخارجية غير متاحة.")
+        val folder = File(baseFolder, "SAWT AI")
+        if (!folder.exists() && !folder.mkdirs()) {
+            throw IOException("تعذر إنشاء مجلد SAWT AI.")
+        }
+        val destination = File(folder, filename)
+        try {
+            source.copyTo(destination, overwrite = true)
+        } catch (error: Exception) {
+            destination.delete()
+            throw error
+        }
     }
     return filename
 }
