@@ -76,12 +76,23 @@ class SupertonicTtsEngine(context: Context) {
 
     private fun verifyInstalledModelIntegrity(onStage: (String) -> Unit) {
         if (modelIntegrityVerified) return
+        val markerValue = File(modelDirectory, ".sawt-verified").readText().trim()
+        val isLegacyArchiveModel = markerValue == ARCHIVE_SHA256
         MODEL_ASSETS.forEach { asset ->
-            onStage("جارٍ التحقق من سلامة ${asset.fileName}…")
             val file = File(modelDirectory, asset.fileName)
             if (!file.isFile || file.length() < asset.minimumBytes) {
                 throw IOException("ملف الصوت ${asset.fileName} غير مكتمل. احذف حزمة الأصوات وأعد تنزيلها.")
             }
+
+            // Older app versions installed the original vector estimator from a
+            // SHA-verified archive. It intentionally has a different digest from
+            // the mobile-optimized estimator downloaded by newer versions.
+            if (isLegacyArchiveModel && asset.fileName == VECTOR_FILE) {
+                onStage("تم التعرف على محرك الصوت الأصلي؛ يمكنك تحديث تحسين السرعة لاحقًا.")
+                return@forEach
+            }
+
+            onStage("جارٍ التحقق من سلامة ${asset.fileName}…")
             val actualSha = calculateSha256(file)
             if (!actualSha.equals(asset.sha256, ignoreCase = true)) {
                 throw IOException("فشل التحقق من سلامة ${asset.fileName}. احذف حزمة الأصوات وأعد تنزيلها.")
