@@ -392,7 +392,8 @@ class SupertonicTtsEngine(context: Context) {
             var downloaded = 0L
             val digest = MessageDigest.getInstance("SHA-256")
             BufferedInputStream(connection.inputStream).use { input ->
-                BufferedOutputStream(FileOutputStream(destination)).use { output ->
+                val fileOutput = FileOutputStream(destination)
+                BufferedOutputStream(fileOutput).use { output ->
                     val buffer = ByteArray(64 * 1024)
                     while (true) {
                         val count = input.read(buffer)
@@ -403,6 +404,7 @@ class SupertonicTtsEngine(context: Context) {
                         onProgress(downloaded, total)
                     }
                     output.flush()
+                    fileOutput.fd.sync()
                 }
             }
             if (downloaded < MIN_OPTIMIZED_VECTOR_SIZE_BYTES) {
@@ -459,7 +461,8 @@ class SupertonicTtsEngine(context: Context) {
             var downloaded = 0L
             val digest = MessageDigest.getInstance("SHA-256")
             BufferedInputStream(connection.inputStream).use { input ->
-                BufferedOutputStream(FileOutputStream(partFile)).use { output ->
+                val fileOutput = FileOutputStream(partFile)
+                BufferedOutputStream(fileOutput).use { output ->
                     val buffer = ByteArray(128 * 1024)
                     while (true) {
                         val count = input.read(buffer)
@@ -470,6 +473,7 @@ class SupertonicTtsEngine(context: Context) {
                         onProgress(downloaded, total)
                     }
                     output.flush()
+                    fileOutput.fd.sync()
                 }
             }
 
