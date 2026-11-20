@@ -51,4 +51,16 @@ class DeviceTuningTest {
             )
         )
     }
+
+    @Test
+    fun unknownMemoryUsesSingleWorkerForSafety() {
+        assertEquals(
+            1,
+            DeviceTuning.recommendedCpuThreads(
+                totalMemoryBytes = 0L,
+                lowRamDevice = false,
+                availableProcessors = 8
+            )
+        )
+    }
 }

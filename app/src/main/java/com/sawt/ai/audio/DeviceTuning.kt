@@ -15,7 +15,8 @@ internal object DeviceTuning {
     ): Int {
         val memoryClassIsLow =
             totalMemoryBytes in 1L..LOW_RAM_THRESHOLD_BYTES
-        return if (lowRamDevice || memoryClassIsLow) {
+        val memoryIsUnknown = totalMemoryBytes <= 0L
+        return if (lowRamDevice || memoryClassIsLow || memoryIsUnknown) {
             1
         } else {
             availableProcessors.coerceIn(1, 2)
