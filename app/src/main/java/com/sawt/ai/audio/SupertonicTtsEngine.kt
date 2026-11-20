@@ -7,7 +7,11 @@ import com.k2fsa.sherpa.onnx.GenerationConfig
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.getOfflineTtsConfig
 import com.sawt.ai.audio.DeviceTuning
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
@@ -17,6 +21,8 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Native, on-device Supertonic 3 engine.
@@ -35,91 +41,138 @@ class SupertonicTtsEngine(context: Context) {
     private val appContext = context.applicationContext
     private val modelsRoot = File(appContext.filesDir, "sawt-models")
     private val modelDirectory = File(modelsRoot, MODEL_DIRECTORY)
+    private val operationMutex = Mutex()
+    private val nativeEngineLock = Any()
+    private val activeSynthesisCount = AtomicInteger(0)
+    private val closeRequested = AtomicBoolean(false)
+
+    @Volatile
     private var nativeTts: OfflineTts? = null
 
-    fun isModelInstalled(): Boolean {
-        val marker = File(modelDirectory, ".sawt-verified")
-        if (!marker.isFile) return false
-        val markerValue = marker.readText().trim()
-        if (markerValue != ARCHIVE_SHA256 && markerValue != OPTIMIZED_INSTALL_MARKER && markerValue != DIRECT_INSTALL_MARKER) return false
-        return requiredModelFiles.all { (name, minimumBytes) ->
-            File(modelDirectory, name).let { it.isFile && it.length() >= minimumBytes }
+    fun isModelInstalled(): Boolean = isInstalledDirectory(modelDirectory)
+
+    fun needsOptimization(): Boolean = isModelInstalled() &&
+        runCatching { File(modelDirectory, ".sawt-verified").readText().trim() == ARCHIVE_SHA256 }
+            .getOrDefault(false)
+
+    private fun isInstalledDirectory(directory: File): Boolean {
+        return try {
+            val marker = File(directory, ".sawt-verified")
+            val markerValue = if (marker.isFile) marker.readText().trim() else ""
+            (markerValue == ARCHIVE_SHA256 ||
+                markerValue == OPTIMIZED_INSTALL_MARKER ||
+                markerValue == DIRECT_INSTALL_MARKER) &&
+                requiredModelFiles.all { (name, minimumBytes) ->
+                    File(directory, name).let { it.isFile && it.length() >= minimumBytes }
+                }
+        } catch (_: Exception) {
+            false
         }
     }
 
-    fun needsOptimization(): Boolean {
-        val marker = File(modelDirectory, ".sawt-verified")
-        return isModelInstalled() && marker.readText().trim() == ARCHIVE_SHA256
+    private fun recoverInterruptedInstall() {
+        val backupRoot = File(modelsRoot, ".supertonic-previous")
+        if (backupRoot.exists()) {
+            val primaryValid = isInstalledDirectory(modelDirectory)
+            val backupValid = isInstalledDirectory(backupRoot)
+            when {
+                !primaryValid && backupValid -> {
+                    modelDirectory.deleteRecursively()
+                    if (!backupRoot.renameTo(modelDirectory)) {
+                        throw IOException("تعذر استعادة حزمة الأصوات السابقة بعد توقف التثبيت.")
+                    }
+                }
+                primaryValid -> backupRoot.deleteRecursively()
+            }
+        }
+
+        val vectorFile = File(modelDirectory, VECTOR_FILE)
+        val vectorBackup = File(modelDirectory, VECTOR_FILE + ".sawt-backup")
+        if (!vectorFile.isFile && vectorBackup.isFile) {
+            if (!vectorBackup.renameTo(vectorFile)) {
+                throw IOException("تعذر استعادة ملف محرك الصوت السابق.")
+            }
+        } else if (vectorFile.isFile && vectorBackup.exists()) {
+            vectorBackup.delete()
+        }
     }
 
     suspend fun downloadAndInstall(
         onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit,
         onStage: (String) -> Unit
-    ) = withContext(Dispatchers.IO) {
-        if (isModelInstalled() && !needsOptimization()) {
-            onStage("حزمة الأصوات المحسّنة موجودة وسليمة بالفعل.")
-            return@withContext
-        }
-
-        // Keep compatibility with installations created by older app versions.
-        if (needsOptimization()) {
-            onStage("جارٍ تنزيل تحسين السرعة للهواتف…")
-            upgradeInstalledModel(onProgress)
-            onStage("اكتمل تحسين محرك الصوت. يمكنك التحويل دون إنترنت.")
-            return@withContext
-        }
-
-        val availableBytes = StatFs(appContext.filesDir.absolutePath).availableBytes
-        if (availableBytes < MINIMUM_FREE_SPACE_BYTES) {
-            throw IOException("يلزم توفر 350 ميجابايت تقريبًا من المساحة الفارغة لتنزيل الأصوات وتثبيتها.")
-        }
-
-        modelsRoot.mkdirs()
-        // Remove an abandoned archive from a previous installation attempt.
-        File(appContext.cacheDir, "$MODEL_DIRECTORY.tar.bz2").delete()
-        File(modelsRoot, ".supertonic-installing").deleteRecursively()
-        File(modelsRoot, ".supertonic-previous").deleteRecursively()
-        File(appContext.cacheDir, "vector_estimator.mobile.tmp").delete()
-
-        val stagingRoot = File(modelsRoot, ".supertonic-installing")
-        val backupRoot = File(modelsRoot, ".supertonic-previous")
-        stagingRoot.deleteRecursively()
-        if (!stagingRoot.mkdirs()) {
-            throw IOException("تعذر تجهيز مساحة تثبيت الأصوات على الهاتف.")
-        }
-
+    ) {
+        operationMutex.lock()
         try {
-            MODEL_ASSETS.forEachIndexed { index, asset ->
-                onStage("جارٍ تنزيل ${asset.fileName} (${index + 1}/${MODEL_ASSETS.size})…")
-                downloadVerifiedAsset(asset, File(stagingRoot, asset.fileName), onProgress)
-                onStage("تم تنزيل وفحص ${asset.fileName} (${index + 1}/${MODEL_ASSETS.size}).")
-            }
+            withContext(Dispatchers.IO) {
+                recoverInterruptedInstall()
+                if (isModelInstalled() && !needsOptimization()) {
+                    onStage("حزمة الأصوات المحسّنة موجودة وسليمة بالفعل.")
+                    return@withContext
+                }
+                if (needsOptimization()) {
+                    onStage("جارٍ تنزيل تحسين السرعة للهواتف…")
+                    upgradeInstalledModel(onProgress)
+                    onStage("اكتمل تحسين محرك الصوت. يمكنك التحويل دون إنترنت.")
+                    return@withContext
+                }
 
-            val missing = requiredModelFiles.firstOrNull { (name, minimumBytes) ->
-                val file = File(stagingRoot, name)
-                !file.isFile || file.length() < minimumBytes
-            }
-            if (missing != null) {
-                throw IOException("ملفات النموذج غير مكتملة (${missing.first}). أُوقف التثبيت لحماية التطبيق.")
-            }
+                val availableBytes = StatFs(appContext.filesDir.absolutePath).availableBytes
+                if (availableBytes < MINIMUM_FREE_SPACE_BYTES) {
+                    throw IOException("يلزم توفر 350 ميجابايت تقريبًا من المساحة الفارغة لتنزيل الأصوات وتثبيتها.")
+                }
+                if (!modelsRoot.exists() && !modelsRoot.mkdirs()) {
+                    throw IOException("تعذر تجهيز مساحة تثبيت الأصوات على الهاتف.")
+                }
 
-            File(stagingRoot, ".sawt-verified").writeText(DIRECT_INSTALL_MARKER)
-            onStage("تم تنزيل وفحص ملفات الأصوات السبعة. جارٍ اعتماد التثبيت…")
+                File(appContext.cacheDir, "$MODEL_DIRECTORY.tar.bz2").delete()
+                File(modelsRoot, ".supertonic-installing").deleteRecursively()
+                File(modelsRoot, ".supertonic-previous").deleteRecursively()
+                File(appContext.cacheDir, "vector_estimator.mobile.tmp").delete()
 
-            close()
-            backupRoot.deleteRecursively()
-            if (modelDirectory.exists() && !modelDirectory.renameTo(backupRoot)) {
-                throw IOException("تعذر تجهيز ملفات الصوت القديمة للاستبدال.")
+                val stagingRoot = File(modelsRoot, ".supertonic-installing")
+                val backupRoot = File(modelsRoot, ".supertonic-previous")
+                if (!stagingRoot.mkdirs()) {
+                    throw IOException("تعذر تجهيز مساحة تثبيت الأصوات على الهاتف.")
+                }
+
+                try {
+                    MODEL_ASSETS.forEachIndexed { index, asset ->
+                        onStage("جارٍ تنزيل ${asset.fileName} (${index + 1}/${MODEL_ASSETS.size})…")
+                        downloadVerifiedAsset(asset, File(stagingRoot, asset.fileName), onProgress)
+                        onStage("تم تنزيل وفحص ${asset.fileName} (${index + 1}/${MODEL_ASSETS.size}).")
+                    }
+
+                    val missing = requiredModelFiles.firstOrNull { (name, minimumBytes) ->
+                        val file = File(stagingRoot, name)
+                        !file.isFile || file.length() < minimumBytes
+                    }
+                    if (missing != null) {
+                        throw IOException("ملفات النموذج غير مكتملة (${missing.first}). أُوقف التثبيت لحماية التطبيق.")
+                    }
+
+                    File(stagingRoot, ".sawt-verified").writeText(DIRECT_INSTALL_MARKER)
+                    onStage("تم تنزيل وفحص ملفات الأصوات السبعة. جارٍ اعتماد التثبيت…")
+                    releaseNativeEngine()
+                    backupRoot.deleteRecursively()
+                    if (modelDirectory.exists() && !modelDirectory.renameTo(backupRoot)) {
+                        throw IOException("تعذر تجهيز ملفات الصوت القديمة للاستبدال.")
+                    }
+                    if (!stagingRoot.renameTo(modelDirectory)) {
+                        if (backupRoot.exists()) backupRoot.renameTo(modelDirectory)
+                        throw IOException("تعذر اعتماد ملفات الصوت بعد التحقق منها.")
+                    }
+                    backupRoot.deleteRecursively()
+                    onStage("اكتمل تثبيت الأصوات العشرة. يمكنك الآن العمل دون إنترنت.")
+                } catch (error: OutOfMemoryError) {
+                    stagingRoot.deleteRecursively()
+                    throw IOException("لم تكفِ ذاكرة الهاتف لإكمال تثبيت الأصوات. أغلق التطبيقات الأخرى وأعد المحاولة.", error)
+                } catch (error: Exception) {
+                    stagingRoot.deleteRecursively()
+                    throw error
+                }
             }
-            if (!stagingRoot.renameTo(modelDirectory)) {
-                if (backupRoot.exists()) backupRoot.renameTo(modelDirectory)
-                throw IOException("تعذر اعتماد ملفات الصوت بعد التحقق منها.")
-            }
-            backupRoot.deleteRecursively()
-            onStage("اكتمل تثبيت الأصوات العشرة. يمكنك الآن العمل دون إنترنت.")
-        } catch (error: Exception) {
-            stagingRoot.deleteRecursively()
-            throw error
+        } finally {
+            operationMutex.unlock()
         }
     }
 
@@ -129,67 +182,147 @@ class SupertonicTtsEngine(context: Context) {
         speakerId: Int,
         speed: Float,
         onStage: (String) -> Unit = {}
-    ): File = withContext(Dispatchers.IO) {
-        val spokenText = text.trim()
-        if (spokenText.isEmpty()) throw IOException("اكتب النص أولًا.")
-        if (spokenText.length > 2000 || spokenText.toByteArray(Charsets.UTF_8).size > 5000) {
-            throw IOException("النص طويل. قسّمه إلى فقرات لا تتجاوز 2000 حرف.")
-        }
-        if (language !in setOf("ar", "en")) throw IOException("اختر العربية أو الإنجليزية.")
-        if (speakerId !in 0..9) throw IOException("اختيار الصوت غير صالح.")
-        if (!isModelInstalled()) throw IOException("نزّل حزمة الأصوات أولًا.")
+    ): File {
+        operationMutex.lock()
+        var registered = false
+        try {
+            beginSynthesis()
+            registered = true
+            return withContext(Dispatchers.IO) {
+                val spokenText = text.trim()
+                if (spokenText.isEmpty()) throw IOException("اكتب النص أولًا.")
+                if (spokenText.length > MAX_TEXT_CHARACTERS ||
+                    spokenText.toByteArray(Charsets.UTF_8).size > MAX_TEXT_BYTES
+                ) {
+                    throw IOException("النص طويل. قسّمه إلى فقرات لا تتجاوز 2000 حرف.")
+                }
+                if (language !in setOf("ar", "en")) throw IOException("اختر العربية أو الإنجليزية.")
+                if (speakerId !in 0..9) throw IOException("اختيار الصوت غير صالح.")
+                if (!speed.isFinite()) throw IOException("سرعة القراءة غير صالحة.")
+                if (!isModelInstalled()) throw IOException("نزّل حزمة الأصوات أولًا.")
 
-        val engine = nativeTts ?: try {
-            onStage("جارٍ تجهيز محرك الصوت على الهاتف…")
-            createNativeEngine().also { nativeTts = it }
-        } catch (error: OutOfMemoryError) {
-            close()
-            throw IOException("ذاكرة الهاتف غير كافية لتحميل محرك الصوت. أغلق التطبيقات الأخرى وأعد المحاولة.", error)
-        }
-        val config = GenerationConfig(
-            sid = speakerId,
-            speed = speed.coerceIn(0.8f, 1.2f),
-            // Supertonic quality steps increase inference work. On this app's
-            // low-memory target, keep the fast preset as a hard upper bound.
-            numSteps = 4,
-            extra = mapOf("lang" to language)
-        )
-        onStage("جارٍ توليد الصوت…")
-        // Avoid the JNI progress-callback path on Android. Some Sherpa-ONNX
-        // callback paths have been reported to terminate the process with SIGABRT.
-        // This plain API runs on Dispatchers.IO and keeps UI progress indeterminate.
-        val audio = try {
-            engine.generateWithConfig(spokenText, config)
-        } catch (error: OutOfMemoryError) {
-            close()
-            throw IOException("ذاكرة الهاتف لم تكفِ لإنشاء هذا المقطع. جرّب نصًا أقصر وأغلق التطبيقات الأخرى.", error)
-        }
-        if (audio.samples.isEmpty() || audio.sampleRate <= 0) {
-            throw IOException("لم ينتج محرك الصوت ملفًا صالحًا. جرّب نصًا أقصر.")
-        }
+                val engine = try {
+                    getOrCreateNativeEngine()
+                } catch (error: OutOfMemoryError) {
+                    releaseNativeEngine()
+                    throw IOException("ذاكرة الهاتف غير كافية لتحميل محرك الصوت. أغلق التطبيقات الأخرى وأعد المحاولة.", error)
+                } catch (error: LinkageError) {
+                    releaseNativeEngine()
+                    throw IOException("تعذر تحميل مكتبة محرك الصوت على هذا الجهاز.", error)
+                } catch (error: Exception) {
+                    releaseNativeEngine()
+                    throw IOException("تعذر تجهيز محرك الصوت. أعد فتح التطبيق وحاول مجددًا.", error)
+                }
 
-        onStage("اكتمل توليد المقطع. جارٍ حفظ ملف الصوت…")
-        val output = File(appContext.cacheDir, "sawt-${System.currentTimeMillis()}.wav")
-        if (!audio.save(output.absolutePath) || !output.isFile || output.length() < 44L) {
-            output.delete()
-            throw IOException("تعذر حفظ الصوت الناتج.")
+                val config = GenerationConfig(
+                    sid = speakerId,
+                    speed = speed.coerceIn(0.8f, 1.2f),
+                    numSteps = 4,
+                    extra = mapOf("lang" to language)
+                )
+                val chunks = TextChunker.split(spokenText, MAX_CHUNK_CHARACTERS)
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                if (chunks.isEmpty()) throw IOException("لا يوجد نص صالح للتحويل.")
+
+                onStage("تم تجهيز المحرك. سيُحوّل النص على دفعات صغيرة لتقليل استهلاك الذاكرة.")
+                val output = try {
+                    File.createTempFile("sawt-", ".wav", appContext.cacheDir)
+                } catch (error: Exception) {
+                    throw IOException("تعذر إنشاء ملف الصوت المؤقت. تحقق من مساحة التخزين.", error)
+                }
+
+                try {
+                    Pcm16WavWriter(output).use { writer ->
+                        val coroutineContext = currentCoroutineContext()
+                        for ((index, chunk) in chunks.withIndex()) {
+                            coroutineContext.ensureActive()
+                            onStage("جارٍ توليد الجزء ${index + 1} من ${chunks.size}…")
+                            val audio = try {
+                                engine.generateWithConfig(chunk, config)
+                            } catch (error: OutOfMemoryError) {
+                                releaseNativeEngine()
+                                throw IOException("لم تكفِ ذاكرة الهاتف لإنشاء الجزء ${index + 1}. جرّب نصًا أقصر وأغلق التطبيقات الأخرى.", error)
+                            } catch (error: LinkageError) {
+                                releaseNativeEngine()
+                                throw IOException("حدث خلل في مكتبة محرك الصوت أثناء التوليد.", error)
+                            } catch (error: Exception) {
+                                releaseNativeEngine()
+                                throw IOException("تعذر توليد الجزء ${index + 1} من النص.", error)
+                            }
+
+                            if (audio.samples.isEmpty() || audio.sampleRate <= 0) {
+                                releaseNativeEngine()
+                                throw IOException("لم ينتج الجزء ${index + 1} ملفًا صوتيًا صالحًا.")
+                            }
+                            writer.append(audio.samples, audio.sampleRate)
+                            onStage("اكتمل الجزء ${index + 1} من ${chunks.size}.")
+                        }
+                        writer.finish()
+                    }
+
+                    if (!output.isFile || output.length() < WAV_MINIMUM_BYTES) {
+                        throw IOException("لم يكتمل حفظ ملف الصوت.")
+                    }
+                    onStage("اكتمل إنشاء الصوت وحفظه.")
+                    output
+                } catch (error: OutOfMemoryError) {
+                    output.delete()
+                    releaseNativeEngine()
+                    throw IOException("لم تكفِ ذاكرة الهاتف لإكمال ملف الصوت. أغلق التطبيقات الأخرى وجرّب فقرة أقصر.", error)
+                } catch (error: Exception) {
+                    output.delete()
+                    throw error
+                }
+            }
+        } finally {
+            if (registered) endSynthesis()
+            operationMutex.unlock()
         }
-        output
     }
 
     fun deleteDownloadedModels() {
-        close()
+        if (operationMutex.isLocked || activeSynthesisCount.get() > 0) {
+            throw IllegalStateException("لا يمكن حذف الأصوات أثناء وجود عملية قيد التنفيذ.")
+        }
+        releaseNativeEngine()
         modelsRoot.deleteRecursively()
         File(appContext.cacheDir, "$MODEL_DIRECTORY.tar.bz2").delete()
         File(appContext.cacheDir, "vector_estimator.mobile.tmp").delete()
     }
 
     fun close() {
-        try {
-            nativeTts?.release()
-        } catch (_: Exception) {
+        closeRequested.set(true)
+        if (activeSynthesisCount.get() == 0) releaseNativeEngine()
+    }
+
+    private fun beginSynthesis() {
+        if (closeRequested.get()) throw CancellationException("تم إغلاق شاشة التحويل.")
+        activeSynthesisCount.incrementAndGet()
+        if (closeRequested.get()) {
+            endSynthesis()
+            throw CancellationException("تم إغلاق شاشة التحويل.")
         }
-        nativeTts = null
+    }
+
+    private fun endSynthesis() {
+        val remaining = activeSynthesisCount.decrementAndGet()
+        if (remaining <= 0 && closeRequested.get()) releaseNativeEngine()
+    }
+
+    private fun releaseNativeEngine() {
+        synchronized(nativeEngineLock) {
+            val current = nativeTts
+            nativeTts = null
+            try {
+                current?.release()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun getOrCreateNativeEngine(): OfflineTts = synchronized(nativeEngineLock) {
+        nativeTts ?: createNativeEngine().also { nativeTts = it }
     }
 
     private fun recommendedNumThreads(): Int {
@@ -230,7 +363,7 @@ class SupertonicTtsEngine(context: Context) {
         val optimizedVector = File(appContext.cacheDir, "vector_estimator.mobile.tmp")
         try {
             downloadOptimizedVectorEstimator(optimizedVector, onProgress)
-            close()
+            releaseNativeEngine()
             replaceFileSafely(optimizedVector, File(modelDirectory, VECTOR_FILE))
             File(modelDirectory, ".sawt-verified").writeText(OPTIMIZED_INSTALL_MARKER)
         } catch (error: Exception) {
@@ -366,6 +499,10 @@ class SupertonicTtsEngine(context: Context) {
 
     companion object {
         const val MODEL_DIRECTORY = "sherpa-onnx-supertonic-3-tts-int8-2026-05-11"
+        private const val MAX_TEXT_CHARACTERS = 2_000
+        private const val MAX_TEXT_BYTES = 5_000
+        private const val MAX_CHUNK_CHARACTERS = 180
+        private const val WAV_MINIMUM_BYTES = 44L
         const val ARCHIVE_SHA256 = "82fa96f91c4ef8abaae3a14a3f4153facf88bed821d1f7331cec2700f432c427"
         const val OPTIMIZED_VECTOR_URL =
             "https://huggingface.co/WilburDev/supertonic-3-mobile/resolve/2d53d752a6e9a1db1bd0f63fe36806dc6d1a3ee5/vector_estimator.int8.onnx"
