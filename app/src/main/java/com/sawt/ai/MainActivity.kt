@@ -51,14 +51,14 @@ import java.io.File
 import java.io.IOException
 import java.util.Locale
 
-private val Background = Color(0xFF070707)
-private val SurfaceDark = Color(0xFF121212)
-private val SurfaceRaised = Color(0xFF1A1A1A)
+private val Background = Color(0xFF0D1924)
+private val SurfaceDark = Color(0xFF142635)
+private val SurfaceRaised = Color(0xFF1D3344)
 private val Gold = Color(0xFFD8B56D)
 private val GoldSoft = Color(0xFFB99A5C)
 private val TextMain = Color(0xFFF5F1E8)
-private val TextMuted = Color(0xFF9B978E)
-private val Border = Color(0xFF302B22)
+private val TextMuted = Color(0xFFA0B0BC)
+private val Border = Color(0xFF304757)
 private const val MAX_TEXT_CHARS = 2_000
 private const val MAX_PREVIEW_CACHE_ENTRIES = 6
 
@@ -96,6 +96,7 @@ private fun SawtStudio() {
     val scope = rememberCoroutineScope()
     val engine = remember(context) { SupertonicTtsEngine(context) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    var showStartup by remember { mutableStateOf(true) }
 
     var input by remember { mutableStateOf("") }
     var language by remember { mutableStateOf("ar") }
@@ -103,16 +104,16 @@ private fun SawtStudio() {
     var speed by remember { mutableFloatStateOf(1.0f) }
     var modelReady by remember { mutableStateOf(engine.isModelInstalled()) }
     var modelLoading by remember { mutableStateOf(false) }
-    var modelStartedAt by remember { mutableLongStateOf(0L) }
-    var modelElapsedMs by remember { mutableLongStateOf(0L) }
     var modelProgress by remember { mutableIntStateOf(0) }
     var modelProgressIndeterminate by remember { mutableStateOf(false) }
     var modelStage by remember { mutableStateOf("الأصوات غير مثبتة بعد") }
     var generating by remember { mutableStateOf(false) }
     var previewing by remember { mutableStateOf(false) }
     var generationStartedAt by remember { mutableLongStateOf(0L) }
-    var generationElapsedMs by remember { mutableLongStateOf(0L) }
-    var estimatedTotalMs by remember { mutableLongStateOf(0L) }
+    var generationRemainingMs by remember { mutableLongStateOf(0L) }
+    var remainingEstimateBaseMs by remember { mutableLongStateOf(0L) }
+    var remainingEstimateUpdatedAt by remember { mutableLongStateOf(0L) }
+    var hasRemainingEstimate by remember { mutableStateOf(false) }
     var generationStage by remember { mutableStateOf("جارٍ تجهيز الصوت…") }
     var lastVoiceName by remember { mutableStateOf("") }
     var lastLanguageName by remember { mutableStateOf("") }
@@ -125,6 +126,30 @@ private fun SawtStudio() {
     val metricsPrefs = remember(context) {
         context.getSharedPreferences("sawt_generation_metrics", Context.MODE_PRIVATE)
     }
+    fun updateRemainingEstimate(
+        completedCharacters: Int,
+        totalCharacters: Int,
+        startedAt: Long,
+        requestLanguage: String,
+        requestSpeed: Float
+    ) {
+        val elapsed = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L)
+        val observedRate = GenerationProgress.observedMsPerCharacter(elapsed, completedCharacters)
+        val previousRate = metricsPrefs.getFloat(generationRateKey(requestLanguage, requestSpeed), 0f)
+        val blendedRate = when {
+            previousRate > 0f && observedRate > 0f -> previousRate * 0.65f + observedRate * 0.35f
+            observedRate > 0f -> observedRate
+            else -> previousRate
+        }
+        val estimate = GenerationProgress.estimateRemainingMs(blendedRate, completedCharacters, totalCharacters)
+        mainHandler.post {
+            remainingEstimateBaseMs = estimate
+            generationRemainingMs = estimate
+            remainingEstimateUpdatedAt = SystemClock.elapsedRealtime()
+            hasRemainingEstimate = estimate > 0L
+        }
+    }
+
     var status by remember { mutableStateOf("اكتب نصك، اختر الصوت، ثم أنشئ التسجيل.") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showHelp by remember { mutableStateOf(false) }
@@ -134,16 +159,19 @@ private fun SawtStudio() {
         onDispose { engine.close() }
     }
 
-    LaunchedEffect(generating, previewing, generationStartedAt) {
-        while (generating || previewing) {
-            generationElapsedMs = (SystemClock.elapsedRealtime() - generationStartedAt).coerceAtLeast(0L)
-            delay(500)
+    LaunchedEffect(showStartup) {
+        if (showStartup) {
+            delay(1_050L)
+            showStartup = false
         }
     }
 
-    LaunchedEffect(modelLoading, modelStartedAt) {
-        while (modelLoading) {
-            modelElapsedMs = (SystemClock.elapsedRealtime() - modelStartedAt).coerceAtLeast(0L)
+    LaunchedEffect(generating, previewing, generationStartedAt) {
+        while (generating || previewing) {
+            if (hasRemainingEstimate) {
+                val sinceLastEstimate = (SystemClock.elapsedRealtime() - remainingEstimateUpdatedAt).coerceAtLeast(0L)
+                generationRemainingMs = (remainingEstimateBaseMs - sinceLastEstimate).coerceAtLeast(0L)
+            }
             delay(500)
         }
     }
@@ -155,6 +183,11 @@ private fun SawtStudio() {
                 ?.filter { it.isFile && it.name.startsWith("sawt-") && it.extension.equals("wav", true) && it.lastModified() < staleBefore }
                 ?.forEach { it.delete() }
         }
+    }
+
+    if (showStartup) {
+        StartupSplash()
+        return
     }
 
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
@@ -172,7 +205,7 @@ private fun SawtStudio() {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Brush.verticalGradient(listOf(Color(0xFF17130D), Background, Background)))
+                        .background(Brush.verticalGradient(listOf(Color(0xFF173044), Background, Background)))
                         .padding(insets)
                         .verticalScroll(rememberScrollState())
                         .padding(horizontal = 20.dp)
@@ -319,8 +352,10 @@ private fun SawtStudio() {
                             }
                             val previewStartedAt = SystemClock.elapsedRealtime()
                             generationStartedAt = previewStartedAt
-                            generationElapsedMs = 0L
-                            estimatedTotalMs = estimateGenerationMs(metricsPrefs, previewLanguage, previewSpeed, sampleText.length)
+                            remainingEstimateBaseMs = estimateGenerationMs(metricsPrefs, previewLanguage, previewSpeed, sampleText.length)
+                            generationRemainingMs = remainingEstimateBaseMs
+                            remainingEstimateUpdatedAt = previewStartedAt
+                            hasRemainingEstimate = generationRemainingMs > 0L
                             generationStage = "جارٍ تجهيز عينة الصوت…"
                             val previewKey = "$previewLanguage-${previewVoice.speakerId}-${String.format(Locale.US, "%.1f", previewSpeed)}"
                             scope.launch {
@@ -333,6 +368,9 @@ private fun SawtStudio() {
                                         speakerId = previewVoice.speakerId,
                                         speed = previewSpeed,
                                         onStage = { stage -> mainHandler.post { generationStage = stage } },
+                                        onProgress = { completed, total ->
+                                            updateRemainingEstimate(completed, total, previewStartedAt, previewLanguage, previewSpeed)
+                                        }
                                     ).also {
                                         previewCache[previewKey] = it
                                         while (previewCache.size > MAX_PREVIEW_CACHE_ENTRIES) {
@@ -346,12 +384,10 @@ private fun SawtStudio() {
                                     lastVoiceName = previewVoice.name
                                     lastLanguageName = if (previewLanguage == "ar") "العربية" else "English"
                                     SpeechPlaybackService.playFile(context, sample.absolutePath)
-                                    generationElapsedMs = SystemClock.elapsedRealtime() - previewStartedAt
-                                    val elapsedSeconds = generationElapsedMs / 1000.0
                                     status = if (cachedSample != null) {
-                                        "عينة ${selectedVoice.name} جاهزة من الذاكرة. بدأ التشغيل فورًا."
+                                        "عينة ${previewVoice.name} جاهزة من الذاكرة. بدأ التشغيل فورًا."
                                     } else {
-                                        "تم تجهيز عينة ${selectedVoice.name} خلال ${String.format(Locale.US, "%.1f", elapsedSeconds)} ثانية."
+                                        "تم تجهيز عينة ${previewVoice.name} وبدأ تشغيلها."
                                     }
                                 } catch (cancelled: CancellationException) {
                                     throw cancelled
@@ -392,7 +428,7 @@ private fun SawtStudio() {
                     Text("وضع التحويل", color = TextMuted, fontSize = 12.sp)
                     Spacer(Modifier.height(7.dp))
                     Surface(
-                        color = Color(0xFF211C13),
+                        color = Color(0xFF21394A),
                         shape = RoundedCornerShape(12.dp),
                         border = BorderStroke(1.dp, Gold),
                         modifier = Modifier.fillMaxWidth()
@@ -448,8 +484,7 @@ private fun SawtStudio() {
                                 }
                                 Spacer(Modifier.height(5.dp))
                                 Text(
-                                    (if (modelProgressIndeterminate) modelStage else "$modelStage · $modelProgress%") +
-                                        " · الوقت المنقضي ${formatDuration(modelElapsedMs)}",
+                                    if (modelProgressIndeterminate) modelStage else "$modelStage · $modelProgress%",
                                     color = GoldSoft,
                                     fontSize = 10.sp
                                 )
@@ -458,8 +493,6 @@ private fun SawtStudio() {
                                 Button(
                                     onClick = {
                                         modelLoading = true
-                                        modelStartedAt = SystemClock.elapsedRealtime()
-                                        modelElapsedMs = 0L
                                         modelProgress = 0
                                         modelProgressIndeterminate = false
                                         errorMessage = null
@@ -544,8 +577,10 @@ private fun SawtStudio() {
                             errorMessage = null
                             status = "جارٍ إنشاء الصوت على الهاتف…"
                             generationStartedAt = SystemClock.elapsedRealtime()
-                            generationElapsedMs = 0L
-                            estimatedTotalMs = estimateGenerationMs(metricsPrefs, requestLanguage, requestSpeed, requestText.length)
+                            remainingEstimateBaseMs = estimateGenerationMs(metricsPrefs, requestLanguage, requestSpeed, requestText.length)
+                            generationRemainingMs = remainingEstimateBaseMs
+                            remainingEstimateUpdatedAt = generationStartedAt
+                            hasRemainingEstimate = generationRemainingMs > 0L
                             generationStage = "جارٍ تجهيز محرك الصوت…"
                             val startedAt = generationStartedAt
                             scope.launch {
@@ -556,9 +591,11 @@ private fun SawtStudio() {
                                         speakerId = requestVoice.speakerId,
                                         speed = requestSpeed,
                                         onStage = { stage -> mainHandler.post { generationStage = stage } },
+                                        onProgress = { completed, total ->
+                                            updateRemainingEstimate(completed, total, startedAt, requestLanguage, requestSpeed)
+                                        }
                                     )
                                     val elapsedMs = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L)
-                                    generationElapsedMs = elapsedMs
                                     val sampleRate = elapsedMs.toFloat() / requestText.length.coerceAtLeast(1)
                                     val prefKey = generationRateKey(requestLanguage, requestSpeed)
                                     val oldRate = metricsPrefs.getFloat(prefKey, 0f)
@@ -568,7 +605,7 @@ private fun SawtStudio() {
                                     lastVoiceName = requestVoice.name
                                     lastLanguageName = if (requestLanguage == "ar") "العربية" else "English"
                                     SpeechPlaybackService.playFile(context, result.absolutePath)
-                                    status = "اكتمل إنشاء الصوت خلال ${formatDuration(elapsedMs)} وبدأ تشغيله."
+                                    status = "اكتمل إنشاء الصوت وبدأ تشغيله."
                                 } catch (cancelled: CancellationException) {
                                     throw cancelled
                                 } catch (error: Exception) {
@@ -585,7 +622,7 @@ private fun SawtStudio() {
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Gold,
                             contentColor = Background,
-                            disabledContainerColor = Color(0xFF3A3428),
+                            disabledContainerColor = Color(0xFF304657),
                             disabledContentColor = TextMuted
                         )
                     ) {
@@ -615,7 +652,11 @@ private fun SawtStudio() {
                                         fontSize = 13.sp
                                     )
                                     Spacer(Modifier.weight(1f))
-                                    Text("المنقضي ${formatDuration(generationElapsedMs)}", color = TextMuted, fontSize = 10.sp)
+                                    Text(
+                                        if (generationRemainingMs > 0L) "المتبقي ${formatDuration(generationRemainingMs)}" else "تقدير الوقت",
+                                        color = GoldSoft,
+                                        fontSize = 10.sp
+                                    )
                                 }
                                 Spacer(Modifier.height(9.dp))
                                 LinearProgressIndicator(
@@ -632,12 +673,14 @@ private fun SawtStudio() {
                                 Spacer(Modifier.height(4.dp))
                                 Text(
                                     when {
-                                        estimatedTotalMs > generationElapsedMs ->
-                                            "الوقت المتبقي التقريبي: ${formatDuration(estimatedTotalMs - generationElapsedMs)}"
-                                        estimatedTotalMs > 0L ->
-                                            "يجري إكمال المقطع؛ التقدير يتحدّث حسب سرعة الهاتف."
+                                        generationRemainingMs > 0L ->
+                                            "الوقت المتبقي التقريبي: ${formatDuration(generationRemainingMs)}"
+                                        generationStage.contains("حفظ") || generationStage.contains("اكتمل إنشاء الصوت") ->
+                                            "يجري إنهاء ملف الصوت وحفظه."
+                                        hasRemainingEstimate ->
+                                            "قد يحتاج الجزء الحالي وقتًا إضافيًا؛ سيتحدّث التقدير بعد اكتماله."
                                         else ->
-                                            "يجري قياس سرعة الهاتف لأول مرة؛ سيظهر تقدير أدق في التحويلات التالية."
+                                            "جارٍ حساب الوقت المتبقي من أول جزء صوتي."
                                     },
                                     color = GoldSoft,
                                     fontSize = 10.sp
@@ -649,7 +692,7 @@ private fun SawtStudio() {
                     if (lastFile != null) {
                         Spacer(Modifier.height(12.dp))
                         Surface(
-                            color = Color(0xFF171717),
+                            color = Color(0xFF142635),
                             shape = RoundedCornerShape(24.dp),
                             border = BorderStroke(1.dp, GoldSoft),
                             modifier = Modifier.fillMaxWidth()
@@ -720,7 +763,7 @@ private fun SawtStudio() {
                     Spacer(Modifier.height(15.dp))
                     Text(status, color = TextMuted, fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                     Spacer(Modifier.height(24.dp))
-                    Text("SAWT AI  •  OFFLINE VOICE STUDIO", color = Color(0xFF625A4B), fontSize = 9.sp, letterSpacing = 1.2.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                    Text("SAWT AI  •  OFFLINE VOICE STUDIO", color = Color(0xFF708795), fontSize = 9.sp, letterSpacing = 1.2.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                     Spacer(Modifier.height(18.dp))
                 }
             }
@@ -787,6 +830,39 @@ private fun SawtStudio() {
     }
 }
 
+
+@Composable
+private fun StartupSplash() {
+    Box(
+        modifier = Modifier.fillMaxSize().background(
+            Brush.verticalGradient(listOf(Color(0xFF1B3549), Color(0xFF0D1924)))
+        ),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                modifier = Modifier.size(92.dp).clip(RoundedCornerShape(28.dp))
+                    .background(Brush.linearGradient(listOf(Gold, GoldSoft))),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.GraphicEq, contentDescription = null, tint = Color(0xFF0D1924), modifier = Modifier.size(54.dp))
+            }
+            Spacer(Modifier.height(22.dp))
+            Text("SAWT AI", color = TextMain, fontSize = 29.sp, fontWeight = FontWeight.Black, letterSpacing = 3.sp)
+            Spacer(Modifier.height(8.dp))
+            Text("صوتٌ يليق بكلماتك", color = Color(0xFFC2D0DA), fontSize = 14.sp)
+        }
+        Column(
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 46.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            LinearProgressIndicator(modifier = Modifier.width(142.dp), color = Gold, trackColor = Color(0xFF294052))
+            Spacer(Modifier.height(11.dp))
+            Text("جارٍ فتح الاستوديو", color = Color(0xFF9AAEBB), fontSize = 11.sp)
+        }
+    }
+}
+
 @Composable
 private fun LanguageButton(label: String, selected: Boolean, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
     OutlinedButton(
@@ -794,7 +870,7 @@ private fun LanguageButton(label: String, selected: Boolean, modifier: Modifier 
         enabled = enabled,
         modifier = modifier.height(46.dp),
         colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = if (selected) Color(0xFF211C13) else SurfaceDark,
+            containerColor = if (selected) Color(0xFF21394A) else SurfaceDark,
             contentColor = if (selected) Gold else TextMuted
         ),
         border = BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) Gold else Border),
@@ -805,7 +881,7 @@ private fun LanguageButton(label: String, selected: Boolean, modifier: Modifier 
 @Composable
 private fun VoiceChoice(voice: VoiceStyle, selected: Boolean, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
     Surface(
-        color = if (selected) Color(0xFF211C13) else SurfaceDark,
+        color = if (selected) Color(0xFF21394A) else SurfaceDark,
         shape = RoundedCornerShape(12.dp),
         border = BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) Gold else Border),
         modifier = modifier.height(62.dp).clickable(enabled = enabled, onClick = onClick)
@@ -829,7 +905,7 @@ private fun QualityButton(label: String, steps: Int, selected: Boolean, modifier
         modifier = modifier.height(42.dp),
         contentPadding = PaddingValues(horizontal = 4.dp),
         colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = if (selected) Color(0xFF211C13) else SurfaceDark,
+            containerColor = if (selected) Color(0xFF21394A) else SurfaceDark,
             contentColor = if (selected) Gold else TextMuted
         ),
         border = BorderStroke(1.dp, if (selected) Gold else Border),

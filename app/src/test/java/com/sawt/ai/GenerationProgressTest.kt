@@ -28,6 +28,20 @@ class GenerationProgressTest {
     }
 
     @Test
+    fun estimatesRemainingTimeFromCharactersNotYetGenerated() {
+        assertEquals(5_000L, GenerationProgress.estimateRemainingMs(250f, 30, 50))
+        assertEquals(0L, GenerationProgress.estimateRemainingMs(250f, 50, 50))
+        assertEquals(0L, GenerationProgress.estimateRemainingMs(250f, 0, 0))
+    }
+
+    @Test
+    fun observedRateRejectsInvalidProgressAndUsesElapsedPerCharacter() {
+        assertEquals(100f, GenerationProgress.observedMsPerCharacter(5_000L, 50), 0.001f)
+        assertEquals(0f, GenerationProgress.observedMsPerCharacter(0L, 50), 0.001f)
+        assertEquals(0f, GenerationProgress.observedMsPerCharacter(5_000L, 0), 0.001f)
+    }
+
+    @Test
     fun rateKeyIsStableAndIncludesLanguageAndSpeed() {
         assertEquals(
             "generation_ms_per_char_ar_1.1",

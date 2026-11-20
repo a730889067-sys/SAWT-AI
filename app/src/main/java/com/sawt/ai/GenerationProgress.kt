@@ -17,6 +17,24 @@ internal object GenerationProgress {
     fun rateKey(language: String, speed: Float): String =
         "generation_ms_per_char_${language}_${String.format(Locale.US, "%.1f", speed)}"
 
+    fun observedMsPerCharacter(elapsedMs: Long, completedCharacters: Int): Float {
+        if (elapsedMs <= 0L || completedCharacters <= 0) return 0f
+        val rate = elapsedMs.toDouble() / completedCharacters.toDouble()
+        if (!rate.isFinite() || rate > Float.MAX_VALUE.toDouble()) return 0f
+        return rate.toFloat().takeIf { it.isFinite() && it > 0f } ?: 0f
+    }
+
+    fun estimateRemainingMs(
+        averageMsPerCharacter: Float,
+        completedCharacters: Int,
+        totalCharacters: Int
+    ): Long {
+        if (totalCharacters <= 0 || completedCharacters < 0 || completedCharacters >= totalCharacters) {
+            return 0L
+        }
+        return estimateMs(averageMsPerCharacter, totalCharacters - completedCharacters)
+    }
+
     fun estimateMs(averageMsPerCharacter: Float, characterCount: Int): Long {
         if (!averageMsPerCharacter.isFinite() || averageMsPerCharacter <= 0f || characterCount <= 0) {
             return 0L

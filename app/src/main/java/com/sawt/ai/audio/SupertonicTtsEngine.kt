@@ -227,7 +227,8 @@ class SupertonicTtsEngine(context: Context) {
         language: String,
         speakerId: Int,
         speed: Float,
-        onStage: (String) -> Unit = {}
+        onStage: (String) -> Unit = {},
+        onProgress: (completedCharacters: Int, totalCharacters: Int) -> Unit = { _, _ -> }
     ): File {
         operationMutex.lock()
         var registered = false
@@ -267,9 +268,14 @@ class SupertonicTtsEngine(context: Context) {
                     numSteps = 4,
                     extra = mapOf("lang" to language)
                 )
-                val chunks = TextChunker.split(spokenText, MAX_CHUNK_CHARACTERS)
-                    .map { it.trim() }
-                    .filter { it.isNotEmpty() }
+                val chunks = mutableListOf<String>()
+                TextChunker.split(spokenText, MAX_CHUNK_CHARACTERS).forEach { chunk ->
+                    when {
+                        chunk.isBlank() && chunks.isNotEmpty() ->
+                            chunks[chunks.lastIndex] = chunks.last() + chunk
+                        chunk.isNotEmpty() -> chunks.add(chunk)
+                    }
+                }
                 if (chunks.isEmpty()) throw IOException("لا يوجد نص صالح للتحويل.")
 
                 onStage("تم تجهيز المحرك. سيُحوّل النص على دفعات صغيرة لتقليل استهلاك الذاكرة.")
@@ -282,6 +288,7 @@ class SupertonicTtsEngine(context: Context) {
                 try {
                     Pcm16WavWriter(output).use { writer ->
                         val coroutineContext = currentCoroutineContext()
+                        var completedCharacters = 0
                         for ((index, chunk) in chunks.withIndex()) {
                             coroutineContext.ensureActive()
                             onStage("جارٍ توليد الجزء ${index + 1} من ${chunks.size}…")
@@ -303,6 +310,8 @@ class SupertonicTtsEngine(context: Context) {
                                 throw IOException("لم ينتج الجزء ${index + 1} ملفًا صوتيًا صالحًا.")
                             }
                             writer.append(audio.samples, audio.sampleRate)
+                            completedCharacters += chunk.length
+                            onProgress(completedCharacters, spokenText.length)
                             onStage("اكتمل الجزء ${index + 1} من ${chunks.size}.")
                         }
                         writer.finish()
