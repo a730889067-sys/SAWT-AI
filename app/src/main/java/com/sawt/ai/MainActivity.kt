@@ -1232,9 +1232,17 @@ private fun VoiceChoice(voice: VoiceStyle, selected: Boolean, modifier: Modifier
 }
 
 @Composable
-private fun QualityButton(label: String, steps: Int, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun QualityButton(
+    label: String,
+    steps: Int,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
     OutlinedButton(
         onClick = onClick,
+        enabled = enabled,
         modifier = modifier.height(42.dp),
         contentPadding = PaddingValues(horizontal = 4.dp),
         colors = ButtonDefaults.outlinedButtonColors(
