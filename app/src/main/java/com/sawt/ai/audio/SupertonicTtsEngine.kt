@@ -386,6 +386,15 @@ class SupertonicTtsEngine(context: Context) {
         File(appContext.cacheDir, "vector_estimator.mobile.tmp").delete()
     }
 
+    suspend fun releaseNativeModel() {
+        operationMutex.lock()
+        try {
+            withContext(Dispatchers.IO) { releaseNativeEngine() }
+        } finally {
+            operationMutex.unlock()
+        }
+    }
+
     fun close() {
         closeRequested.set(true)
         if (activeSynthesisCount.get() == 0) releaseNativeEngine()
