@@ -111,10 +111,10 @@ class AudioHistoryStore(
             if (keep.size >= maxEntries) break
             val oldFile = File(root, "${old.id}.wav")
             val oldSize = oldFile.length()
-            if (oldSize > 0L && retainedBytes <= maxTotalBytes - oldSize) {
-                keep.add(old)
-                retainedBytes += oldSize
-            }
+            if (oldSize <= 0L) continue
+            if (retainedBytes > maxTotalBytes - oldSize) break
+            keep.add(old)
+            retainedBytes += oldSize
         }
         try {
             writeEntries(keep)
