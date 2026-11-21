@@ -52,7 +52,7 @@ class NabraLocalBridge(
         try {
             closeActive(delete = true)
             sampleRate = rate.coerceIn(8_000, 48_000)
-            val file = File(appContext.cacheDir, "sawt-${System.currentTimeMillis()}.wav")
+            val file = File(appContext.cacheDir, "sawt-nabra-${UUID.randomUUID()}.wav")
             val output = RandomAccessFile(file, "rw")
             output.setLength(0)
             output.write(ByteArray(WAV_HEADER_BYTES))
