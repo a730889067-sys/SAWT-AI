@@ -10,7 +10,6 @@ export default defineConfig({
     assetsInlineLimit: 0,
     rollupOptions: {
       input: {
-        index: new URL("./index.html", import.meta.url).pathname,
         tashkeel: new URL("./tashkeel.html", import.meta.url).pathname
       }
     }
