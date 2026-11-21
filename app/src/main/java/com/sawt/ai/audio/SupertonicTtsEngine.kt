@@ -656,6 +656,23 @@ class SupertonicTtsEngine(context: Context) {
         try {
             connection.connect()
             val status = connection.responseCode
+            if (status == HttpURLConnection.HTTP_REQUESTED_RANGE_NOT_SATISFIABLE &&
+                partFile.isFile && partFile.length() >= asset.minimumBytes &&
+                calculateSha256(partFile).equals(asset.sha256, ignoreCase = true)
+            ) {
+                if (destination.exists() && !destination.delete()) {
+                    throw IOException("تعذر اعتماد الملف المكتمل ${asset.fileName}.")
+                }
+                if (!partFile.renameTo(destination)) {
+                    throw IOException("تعذر اعتماد الملف المكتمل ${asset.fileName}.")
+                }
+                completed = true
+                onProgress(
+                    destination.length(),
+                    asset.expectedBytes.takeIf { it > 0L } ?: destination.length()
+                )
+                return
+            }
             if (status !in 200..299) {
                 throw IOException("تعذر تنزيل ${asset.fileName} (HTTP $status).")
             }
