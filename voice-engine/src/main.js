@@ -124,6 +124,14 @@ async function generate(text, speed = 1, options = {}) {
   }
 }
 
+async function releaseRuntime() {
+  try { await tts?.dispose(); } catch {}
+  tts = null;
+  loadPromise = null;
+  loadedKey = "";
+  native()?.onEngineReleased();
+}
+
 async function removeDownloadedModels() {
   try { await tts?.dispose(); } catch {}
   tts = null;
@@ -136,6 +144,7 @@ async function removeDownloadedModels() {
 window.sawtTts = {
   load: options => load(options).catch(() => null),
   generate,
+  releaseRuntime,
   removeDownloadedModels
 };
 
