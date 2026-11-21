@@ -171,4 +171,54 @@ class DeviceTuningTest {
             )
         )
     }
+
+    @Test
+    fun highMemoryDeviceCanUseEightQualitySteps() {
+        assertEquals(8, DeviceTuning.recommendedNumSteps(
+            8L * 1024L * 1024L * 1024L,
+            4L * 1024L * 1024L * 1024L,
+            false,
+            8
+        ))
+    }
+
+    @Test
+    fun mediumMemoryDeviceCapsQualityAtSixSteps() {
+        assertEquals(6, DeviceTuning.recommendedNumSteps(
+            4L * 1024L * 1024L * 1024L,
+            2L * 1024L * 1024L * 1024L,
+            false,
+            8
+        ))
+    }
+
+    @Test
+    fun lowMemoryDeviceCapsQualityAtFourSteps() {
+        assertEquals(4, DeviceTuning.recommendedNumSteps(
+            2L * 1024L * 1024L * 1024L,
+            900L * 1024L * 1024L,
+            false,
+            8
+        ))
+    }
+
+    @Test
+    fun highQualityChoiceIsClampedWhenAvailableRamIsCritical() {
+        assertEquals(4, DeviceTuning.recommendedNumSteps(
+            8L * 1024L * 1024L * 1024L,
+            300L * 1024L * 1024L,
+            false,
+            8
+        ))
+    }
+
+    @Test
+    fun fastChoiceStaysFastOnPowerfulDevice() {
+        assertEquals(4, DeviceTuning.recommendedNumSteps(
+            8L * 1024L * 1024L * 1024L,
+            4L * 1024L * 1024L * 1024L,
+            false,
+            4
+        ))
+    }
 }
