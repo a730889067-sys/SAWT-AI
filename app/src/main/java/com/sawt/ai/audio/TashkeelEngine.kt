@@ -119,7 +119,7 @@ class TashkeelEngine(
             }
         }
 
-    private inner class JsBridge {
+    inner class JsBridge {
         @JavascriptInterface
         fun onPageReady() {
             if (!pageReady.isCompleted) pageReady.complete(Unit)
