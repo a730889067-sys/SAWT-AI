@@ -1,4 +1,4 @@
-import { NabraTTS, clearCache } from "nabra-tts";
+import { NabraTTS, clearCache } from "../vendor/nabra-tts/src/index.ts";
 
 const native = () => window.SAWTBridge;
 let tts = null;
