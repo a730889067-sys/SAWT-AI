@@ -65,15 +65,19 @@ class VoiceCatalogRepository(private val context: Context) {
             if (entries.isEmpty()) throw IOException("لم يحتوِ فهرس الأصوات على أصوات متوافقة.")
             val cache = File(context.filesDir, CACHE_FILE)
             val temp = File(context.filesDir, "$CACHE_FILE.part")
+            val backup = File(context.filesDir, "$CACHE_FILE.bak")
             temp.writeText(body)
-            if (cache.exists() && !cache.delete()) {
+            backup.delete()
+            if (cache.exists() && !cache.renameTo(backup)) {
                 temp.delete()
-                throw IOException("تعذر تحديث نسخة مكتبة الأصوات.")
+                throw IOException("تعذر تجهيز النسخة السابقة من مكتبة الأصوات.")
             }
             if (!temp.renameTo(cache)) {
                 temp.delete()
+                if (backup.exists()) backup.renameTo(cache)
                 throw IOException("تعذر حفظ مكتبة الأصوات المحدّثة.")
             }
+            backup.delete()
             return entries
         } finally {
             connection.disconnect()
