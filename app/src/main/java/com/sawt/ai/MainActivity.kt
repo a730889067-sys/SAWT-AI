@@ -2,6 +2,8 @@ package com.sawt.ai
 
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -44,10 +46,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalLayoutDirection
+import com.sawt.ai.audio.AudioHistoryEntry
+import com.sawt.ai.audio.AudioHistoryStore
+import com.sawt.ai.audio.NabraTtsEngine
 import com.sawt.ai.audio.SpeechPlaybackService
 import com.sawt.ai.audio.SupertonicTtsEngine
 import com.sawt.ai.audio.TashkeelEngine
 import com.sawt.ai.audio.TashkeelTextProcessor
+import com.sawt.ai.audio.VoiceCatalogRepository
+import com.sawt.ai.audio.VoicePack
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -71,7 +78,9 @@ private const val MAX_PREVIEW_CACHE_ENTRIES = 6
 private data class VoiceStyle(
     val name: String,
     val speakerId: Int,
-    val description: String
+    val description: String,
+    val engineId: String = "supertonic",
+    val catalogId: String = ""
 )
 
 private val maleVoices = listOf(
@@ -102,6 +111,28 @@ private fun SawtStudio() {
     val scope = rememberCoroutineScope()
     val engine = remember(context) { SupertonicTtsEngine(context) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    val historyStore = remember(context) {
+        AudioHistoryStore(File(context.filesDir, "audio_history"), maxEntries = 100)
+    }
+    val voiceCatalogRepository = remember(context) { VoiceCatalogRepository(context) }
+    val voicePackPrefs = remember(context) {
+        context.getSharedPreferences("sawt_voice_packs", Context.MODE_PRIVATE)
+    }
+    var historyEntries by remember { mutableStateOf(emptyList<AudioHistoryEntry>()) }
+    var voicePacks by remember(voiceCatalogRepository) {
+        mutableStateOf(voiceCatalogRepository.loadCachedOrBundled())
+    }
+    var installedPackIds by remember(voicePackPrefs) {
+        mutableStateOf(voicePackPrefs.all.filter { (key, value) ->
+            key.startsWith("installed_") && value == true
+        }.keys.map { it.removePrefix("installed_") }.toSet())
+    }
+    var nabraEngine by remember { mutableStateOf<NabraTtsEngine?>(null) }
+    var requestedNumSteps by remember { mutableIntStateOf(8) }
+    var voicePackLoadingId by remember { mutableStateOf<String?>(null) }
+    var voiceCatalogRefreshing by remember { mutableStateOf(false) }
+    var voiceLibraryStatus by remember { mutableStateOf("مكتبة أصوات قابلة للتحديث من GitHub.") }
+    var nabraStatus by remember { mutableStateOf("تنزيل حزمة الفصحى مرة واحدة لتعمل محليًا بعد ذلك.") }
     var showStartup by remember { mutableStateOf(true) }
 
     var inputValue by remember { mutableStateOf(TextFieldValue("")) }
@@ -111,7 +142,7 @@ private fun SawtStudio() {
     var lastAutoDiacritizedText by remember { mutableStateOf("") }
     var language by remember { mutableStateOf("ar") }
     var selectedVoice by remember { mutableStateOf(maleVoices.first()) }
-    var speed by remember { mutableFloatStateOf(1.2f) }
+    var speed by remember { mutableFloatStateOf(1.0f) }
     var modelReady by remember { mutableStateOf(engine.isModelInstalled()) }
     var modelLoading by remember { mutableStateOf(false) }
     var engineWarming by remember { mutableStateOf(false) }
@@ -134,7 +165,10 @@ private fun SawtStudio() {
     // Reuse short preview WAVs during this app session instead of synthesizing
     // the same speaker/language/speed combination repeatedly.
     val previewCache = remember { java.util.LinkedHashMap<String, File>(8, 0.75f, true) }
-    val controlsLocked = modelLoading || engineWarming || generating || previewing
+    val controlsLocked = modelLoading || engineWarming || generating || previewing || voicePackLoadingId != null || voiceCatalogRefreshing
+    val selectedVoiceReady = if (selectedVoice.engineId == "nabra") selectedVoice.catalogId in installedPackIds else modelReady
+    val selectedVoiceReadyForGeneration = selectedVoiceReady &&
+        (selectedVoice.engineId == "nabra" || engineWarmed)
     val metricsPrefs = remember(context) {
         context.getSharedPreferences("sawt_generation_metrics", Context.MODE_PRIVATE)
     }
@@ -162,8 +196,18 @@ private fun SawtStudio() {
         }
     }
 
-    var status by remember { mutableStateOf("اكتب نصك، اختر الصوت، ثم أنشئ التسجيل.") }
+    var status by remember { mutableStateOf("اكتب النص، اختر الصوت، ثم أنشئ التسجيل.") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var pendingHistoryDelete by remember { mutableStateOf<AudioHistoryEntry?>(null) }
+    fun ensureNabraEngine(): NabraTtsEngine {
+        nabraEngine?.let { return it }
+        return NabraTtsEngine(context) { message ->
+            mainHandler.post {
+                nabraStatus = message
+                voiceLibraryStatus = message
+            }
+        }.also { nabraEngine = it }
+    }
     val tashkeelEngine = remember(context, showStartup) {
         if (showStartup) null else TashkeelEngine(context) { message ->
             mainHandler.post { tashkeelStatus = message }
@@ -209,6 +253,21 @@ private fun SawtStudio() {
 
     DisposableEffect(tashkeelEngine) {
         onDispose { tashkeelEngine?.close() }
+    }
+    DisposableEffect(nabraEngine) {
+        onDispose { nabraEngine?.close() }
+    }
+    LaunchedEffect(historyStore, voiceCatalogRepository) {
+        historyEntries = withContext(Dispatchers.IO) { historyStore.list() }
+        val refreshed = withContext(Dispatchers.IO) {
+            runCatching { voiceCatalogRepository.refresh() }.getOrNull()
+        }
+        if (refreshed != null) {
+            voicePacks = refreshed
+            voiceLibraryStatus = "تم تحديث مكتبة الأصوات."
+        } else {
+            voicePacks = voiceCatalogRepository.loadCachedOrBundled()
+        }
     }
 
     LaunchedEffect(input, language, tashkeelEngine) {
@@ -310,6 +369,12 @@ private fun SawtStudio() {
                             modifier = Modifier.size(1.dp).alpha(0f)
                         )
                     }
+                    nabraEngine?.let { controller ->
+                        AndroidView(
+                            factory = { controller.webView },
+                            modifier = Modifier.size(1.dp).alpha(0f)
+                        )
+                    }
                     Spacer(Modifier.height(22.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -326,8 +391,8 @@ private fun SawtStudio() {
                         }
                         Spacer(Modifier.width(13.dp))
                         Column(Modifier.weight(1f)) {
-                            Text("SAWT AI", color = TextMain, fontSize = 21.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
-                            Text("استوديو تحويل النص إلى صوت", color = TextMuted, fontSize = 11.sp)
+                            Text("SAWT", color = TextMain, fontSize = 21.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                            Text("قراءة عربية وإنجليزية", color = TextMuted, fontSize = 11.sp)
                         }
                         IconButton(onClick = { showHelp = true }, modifier = Modifier.size(42.dp)) {
                             Icon(Icons.Default.HelpOutline, contentDescription = "شرح الاستخدام", tint = Gold, modifier = Modifier.size(23.dp))
@@ -335,12 +400,10 @@ private fun SawtStudio() {
                     }
 
                     Spacer(Modifier.height(30.dp))
-                    Text("صوتٌ يليق بكلماتك", color = TextMain, fontSize = 27.sp, fontWeight = FontWeight.Bold)
+                    Text("حوّل النص إلى تسجيل", color = TextMain, fontSize = 25.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(7.dp))
-                    Text("أصوات عربية وإنجليزية تعمل على هاتفك", color = TextMuted, fontSize = 13.sp)
-
-                    Spacer(Modifier.height(15.dp))
-                    Spacer(Modifier.height(25.dp))
+                    Text("تحكّم في النبرة والجودة، واحتفظ بتسجيلاتك", color = TextMuted, fontSize = 13.sp)
+                    Spacer(Modifier.height(24.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("١. اكتب النص", color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.weight(1f))
@@ -417,7 +480,8 @@ private fun SawtStudio() {
                             lastAutoDiacritizedText = ""
                             lastFile = null
                         }
-                        LanguageButton("English", language == "en", Modifier.weight(1f), enabled = !controlsLocked) {
+                        LanguageButton("English", language == "en", Modifier.weight(1f), enabled = !controlsLocked && selectedVoice.engineId == "supertonic") {
+                            if (selectedVoice.engineId == "nabra") selectedVoice = maleVoices.first()
                             language = "en"
                             inputValue = TextFieldValue("")
                             lastAutoDiacritizedText = ""
@@ -426,9 +490,9 @@ private fun SawtStudio() {
                     }
 
                     Spacer(Modifier.height(20.dp))
-                    Text("٣. اختر الصوت الذي تريده", color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text("٣. النبرات الأساسية", color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(7.dp))
-                    Text("نفس الأصوات العشرة متاحة للعربية والإنجليزية.", color = TextMuted, fontSize = 11.sp)
+                    Text("عشرة أنماط مدمجة: خمسة رجالية وخمسة نسائية.", color = TextMuted, fontSize = 11.sp)
                     Spacer(Modifier.height(11.dp))
                     Text("أصوات رجالية", color = GoldSoft, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(7.dp))
@@ -891,7 +955,7 @@ private fun SawtStudio() {
                     Spacer(Modifier.height(15.dp))
                     Text(status, color = TextMuted, fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                     Spacer(Modifier.height(24.dp))
-                    Text("SAWT AI  •  OFFLINE VOICE STUDIO", color = Color(0xFF708795), fontSize = 9.sp, letterSpacing = 1.2.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                    Text("SAWT  ·  مكتبتك الصوتية", color = Color(0xFF708795), fontSize = 9.sp, letterSpacing = 1.2.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                     Spacer(Modifier.height(18.dp))
                 }
             }
