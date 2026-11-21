@@ -171,21 +171,36 @@ async function diacritize(rawText) {
     if (output) for (const tensor of Object.values(output)) tensor.dispose?.();
   }
 }
-self.onmessage = async event => {
+let inferenceQueue = Promise.resolve();
+let latestInferenceId = -1;
+
+self.onmessage = event => {
   const message = event.data || {};
   if (message.type === "load") {
-    try { await load(); }
-    catch (error) { self.postMessage({ type: "error", id: message.id, message: String(error?.message ?? error) }); }
+    load().catch(error => {
+      self.postMessage({ type: "error", id: -1, message: String(error?.message ?? error) });
+    });
   } else if (message.type === "diacritize") {
-    try {
-      const result = await diacritize(message.text);
-      self.postMessage({ type: "result", id: message.id, text: result });
-    } catch (error) {
-      self.postMessage({ type: "error", id: message.id, message: String(error?.message ?? error) });
-    }
+    const id = Number(message.id);
+    latestInferenceId = id;
+    inferenceQueue = inferenceQueue.then(async () => {
+      // If a newer keystroke arrived while this request was waiting, skip it.
+      if (id !== latestInferenceId) return;
+      try {
+        const result = await diacritize(message.text);
+        if (id === latestInferenceId) self.postMessage({ type: "result", id, text: result });
+      } catch (error) {
+        if (id === latestInferenceId) {
+          self.postMessage({ type: "error", id, message: String(error?.message ?? error) });
+        }
+      }
+    });
   } else if (message.type === "dispose") {
-    try { await session?.release(); } catch {}
-    session = null;
-    self.close();
+    latestInferenceId = -1;
+    inferenceQueue = inferenceQueue.finally(async () => {
+      try { await session?.release(); } catch {}
+      session = null;
+      self.close();
+    });
   }
 };
