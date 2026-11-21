@@ -1,0 +1,10 @@
+<resources>
+    <style name="Theme.SawtAI" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@drawable/sawt_startup_background</item>
+        <item name="android:statusBarColor">#0D1924</item>
+        <item name="android:navigationBarColor">#0B1620</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:colorAccent">#D8B56D</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+</resources>
