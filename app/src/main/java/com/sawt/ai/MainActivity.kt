@@ -978,7 +978,6 @@ private fun SawtStudio() {
                                 }
                             }
                         },
-                        },
                         enabled = selectedVoiceReadyForGeneration && !modelLoading && !engineWarming && !generating && !previewing && !tashkeelWorking && voicePackLoadingId == null && input.isNotBlank(),
                         modifier = Modifier.fillMaxWidth().height(58.dp),
                         shape = RoundedCornerShape(18.dp),
