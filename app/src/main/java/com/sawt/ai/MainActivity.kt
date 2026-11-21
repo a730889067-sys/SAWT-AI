@@ -199,6 +199,7 @@ private fun SawtStudio() {
     var status by remember { mutableStateOf("اكتب النص، اختر الصوت، ثم أنشئ التسجيل.") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var pendingHistoryDelete by remember { mutableStateOf<AudioHistoryEntry?>(null) }
+    var showAllHistory by remember { mutableStateOf(false) }
     fun ensureNabraEngine(): NabraTtsEngine {
         nabraEngine?.let { return it }
         return NabraTtsEngine(context) { message ->
@@ -1131,6 +1132,116 @@ private fun SawtStudio() {
                         }
                     }
 
+                    Spacer(Modifier.height(22.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("مكتبتي الصوتية", color = TextMain, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                            Text("${historyEntries.size} تسجيل محفوظ على هذا الجهاز", color = TextMuted, fontSize = 10.sp)
+                        }
+                        if (historyEntries.size > 5) {
+                            TextButton(onClick = { showAllHistory = !showAllHistory }) {
+                                Text(if (showAllHistory) "عرض الأقل" else "عرض الكل", color = GoldSoft, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    if (historyEntries.isEmpty()) {
+                        Surface(
+                            color = SurfaceDark,
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, Border),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                "ستظهر تسجيلاتك هنا بعد إنشاء أول صوت. تبقى محفوظة حتى تحذفها.",
+                                color = TextMuted,
+                                fontSize = 11.sp,
+                                lineHeight = 18.sp,
+                                modifier = Modifier.padding(14.dp)
+                            )
+                        }
+                    } else {
+                        (if (showAllHistory) historyEntries else historyEntries.take(5)).forEach { entry ->
+                            val audioFile = historyStore.audioFile(entry)
+                            if (audioFile != null) {
+                                Surface(
+                                    color = SurfaceDark,
+                                    shape = RoundedCornerShape(16.dp),
+                                    border = BorderStroke(1.dp, Border),
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                                ) {
+                                    Column(Modifier.padding(12.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Column(Modifier.weight(1f)) {
+                                                Text("${entry.voiceName} · ${if (entry.language == "ar") "العربية" else "English"}", color = Gold, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                                Text(formatHistoryDate(entry.createdAtMillis), color = TextMuted, fontSize = 9.sp)
+                                            }
+                                            Text(if (entry.engineId == "nabra") "Nabra" else "${entry.qualitySteps} خطوات", color = TextMuted, fontSize = 9.sp)
+                                        }
+                                        Spacer(Modifier.height(5.dp))
+                                        Text(entry.text.take(120), color = TextMain, fontSize = 11.sp, lineHeight = 17.sp, maxLines = 2)
+                                        Spacer(Modifier.height(7.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            TextButton(
+                                                onClick = { SpeechPlaybackService.playFile(context, audioFile.absolutePath) },
+                                                modifier = Modifier.weight(1f),
+                                                contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp)
+                                            ) { Text("تشغيل", color = Gold, fontSize = 10.sp) }
+                                            TextButton(
+                                                onClick = {
+                                                    inputValue = TextFieldValue(entry.text, TextRange(entry.text.length))
+                                                    language = entry.language
+                                                    if (entry.engineId == "nabra") {
+                                                        voicePacks.firstOrNull { it.id == "nabra-msa-7m-v1" }?.let { pack ->
+                                                            selectedVoice = VoiceStyle(pack.name, -1, "فصحى · تجريبي", "nabra", pack.id)
+                                                        }
+                                                    } else {
+                                                        selectedVoice = (maleVoices + femaleVoices).firstOrNull { it.name == entry.voiceName } ?: selectedVoice
+                                                    }
+                                                    lastAutoDiacritizedText = entry.text
+                                                    lastFile = audioFile
+                                                    lastVoiceName = entry.voiceName
+                                                    lastLanguageName = if (entry.language == "ar") "العربية" else "English"
+                                                    status = "تمت استعادة النص والتسجيل من المكتبة."
+                                                },
+                                                modifier = Modifier.weight(1f),
+                                                contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp)
+                                            ) { Text("استعادة النص", color = TextMuted, fontSize = 10.sp) }
+                                            TextButton(
+                                                onClick = {
+                                                    if (saving) return@TextButton
+                                                    saving = true
+                                                    scope.launch {
+                                                        try {
+                                                            val name = withContext(Dispatchers.IO) { saveAudioToDownloads(context, audioFile) }
+                                                            status = "تم حفظ $name داخل التنزيلات / SAWT AI."
+                                                        } catch (error: Exception) {
+                                                            errorMessage = error.message ?: "تعذر تنزيل التسجيل."
+                                                        } finally {
+                                                            saving = false
+                                                        }
+                                                    }
+                                                },
+                                                modifier = Modifier.weight(1f),
+                                                contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp),
+                                                enabled = !saving
+                                            ) { Text("تنزيل", color = TextMuted, fontSize = 10.sp) }
+                                            TextButton(
+                                                onClick = { pendingHistoryDelete = entry },
+                                                modifier = Modifier.weight(0.8f),
+                                                contentPadding = PaddingValues(horizontal = 2.dp, vertical = 0.dp)
+                                            ) { Text("حذف", color = Color(0xFFE1A7A7), fontSize = 10.sp) }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     Spacer(Modifier.height(15.dp))
                     Text(status, color = TextMuted, fontSize = 11.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                     Spacer(Modifier.height(24.dp))
@@ -1165,6 +1276,35 @@ private fun SawtStudio() {
                     },
                     confirmButton = {
                         TextButton(onClick = { showHelp = false }) { Text("فهمت", color = Gold) }
+                    }
+                )
+            }
+
+            if (pendingHistoryDelete != null) {
+                AlertDialog(
+                    onDismissRequest = { pendingHistoryDelete = null },
+                    containerColor = SurfaceDark,
+                    title = { Text("حذف التسجيل من المكتبة؟", color = Gold) },
+                    text = { Text("سيُحذف ملف WAV المحفوظ لهذا التسجيل فقط. لا يمكن التراجع عن الحذف.", color = TextMain) },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            val selected = pendingHistoryDelete ?: return@TextButton
+                            scope.launch {
+                                try {
+                                    val deleted = withContext(Dispatchers.IO) { historyStore.delete(selected.id) }
+                                    historyEntries = withContext(Dispatchers.IO) { historyStore.list() }
+                                    if (lastFile?.name == "${selected.id}.wav") lastFile = null
+                                    status = if (deleted) "حُذف التسجيل من المكتبة." else "لم يعد التسجيل موجودًا."
+                                } catch (error: Exception) {
+                                    errorMessage = error.message ?: "تعذر حذف التسجيل."
+                                } finally {
+                                    pendingHistoryDelete = null
+                                }
+                            }
+                        }) { Text("حذف", color = Color(0xFFE1A7A7)) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { pendingHistoryDelete = null }) { Text("إلغاء", color = Gold) }
                     }
                 )
             }
@@ -1364,3 +1504,6 @@ private fun estimateGenerationMs(
     contextPrefs.getFloat(generationRateKey(language, speed), 0f),
     characterCount
 )
+
+private fun formatHistoryDate(timestamp: Long): String =
+    java.text.SimpleDateFormat("yyyy/MM/dd  HH:mm", Locale.getDefault()).format(java.util.Date(timestamp))
