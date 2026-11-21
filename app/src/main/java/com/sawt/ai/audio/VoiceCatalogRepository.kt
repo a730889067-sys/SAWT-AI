@@ -1,6 +1,7 @@
 package com.sawt.ai.audio
 
 import android.content.Context
+import android.net.Uri
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
@@ -105,18 +106,33 @@ class VoiceCatalogRepository(private val context: Context) {
             }
             // This first catalog only installs Nabra packs. New engine families need a
             // native integration and a separate review before they can be executable.
+            val sourceUri = runCatching { Uri.parse(sourceUrl) }.getOrNull()
+            val validSource = sourceUri?.scheme == "https" &&
+                sourceUri.host == "huggingface.co" &&
+                sourceUri.path == "/$repo" &&
+                sourceUri.query == null &&
+                sourceUri.fragment == null
             if (!id.matches(ID_REGEX) || engine != "nabra" ||
                 repo != ALLOWED_NABRA_REPOSITORY ||
                 !revision.matches(SHA_REGEX) ||
                 priceType !in setOf("free", "paid") ||
                 languages.isEmpty() ||
-                !sourceUrl.startsWith("https://huggingface.co/$repo")
+                !validSource
             ) continue
             val pinnedBase = "https://huggingface.co/$repo/resolve/$revision/"
-            val validModelUrl = modelUrl == null || (modelUrl.startsWith(pinnedBase) && modelUrl.endsWith(".onnx"))
-            val validVoiceUrl = voiceUrl == null || (voiceUrl.startsWith(pinnedBase) && voiceUrl.endsWith(".bin"))
-            val downloadable = item.optBoolean("downloadable", false) && priceType == "free" &&
-                item.optString("dtype") in setOf("fp16", "fp32") && validModelUrl && validVoiceUrl
+            val expectedModelFile = if (item.optString("dtype") == "fp32") {
+                "onnx/model.onnx"
+            } else {
+                "onnx/model_fp16.onnx"
+            }
+            val expectedVoiceFile = "voices/af_msa.bin"
+            val validModelUrl = modelUrl == null || modelUrl == pinnedBase + expectedModelFile
+            val validVoiceUrl = voiceUrl == null || voiceUrl == pinnedBase + expectedVoiceFile
+            val downloadable = item.optBoolean("downloadable", false) &&
+                priceType == "free" &&
+                item.optString("dtype") in setOf("fp16", "fp32") &&
+                validModelUrl &&
+                validVoiceUrl
             result += VoicePack(
                 id = id,
                 name = item.optString("name").take(70),
