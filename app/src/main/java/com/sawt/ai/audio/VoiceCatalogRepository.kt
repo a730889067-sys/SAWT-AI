@@ -14,6 +14,8 @@ data class VoicePack(
     val engine: String,
     val repository: String,
     val revision: String,
+    val modelUrl: String?,
+    val voiceUrl: String?,
     val dtype: String,
     val priceType: String,
     val priceLabel: String,
@@ -90,6 +92,8 @@ class VoiceCatalogRepository(private val context: Context) {
             val repo = item.optString("repository")
             val revision = item.optString("revision")
             val sourceUrl = item.optString("sourceUrl")
+            val modelUrl = item.optString("modelUrl").takeIf { it.isNotBlank() }
+            val voiceUrl = item.optString("voiceUrl").takeIf { it.isNotBlank() }
             val priceType = item.optString("priceType")
             val languagesJson = item.optJSONArray("languages")
             val languages = buildSet {
@@ -108,8 +112,11 @@ class VoiceCatalogRepository(private val context: Context) {
                 languages.isEmpty() ||
                 !sourceUrl.startsWith("https://huggingface.co/$repo")
             ) continue
+            val pinnedBase = "https://huggingface.co/$repo/resolve/$revision/"
+            val validModelUrl = modelUrl == null || (modelUrl.startsWith(pinnedBase) && modelUrl.endsWith(".onnx"))
+            val validVoiceUrl = voiceUrl == null || (voiceUrl.startsWith(pinnedBase) && voiceUrl.endsWith(".bin"))
             val downloadable = item.optBoolean("downloadable", false) && priceType == "free" &&
-                item.optString("dtype") in setOf("fp16", "fp32")
+                item.optString("dtype") in setOf("fp16", "fp32") && validModelUrl && validVoiceUrl
             result += VoicePack(
                 id = id,
                 name = item.optString("name").take(70),
@@ -117,6 +124,8 @@ class VoiceCatalogRepository(private val context: Context) {
                 engine = engine,
                 repository = repo,
                 revision = revision,
+                modelUrl = modelUrl,
+                voiceUrl = voiceUrl,
                 dtype = item.optString("dtype", "fp16"),
                 priceType = priceType,
                 priceLabel = item.optString("priceLabel").take(40),
