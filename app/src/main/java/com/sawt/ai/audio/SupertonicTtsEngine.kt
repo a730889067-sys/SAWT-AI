@@ -55,6 +55,38 @@ class SupertonicTtsEngine(context: Context) {
 
     fun isModelInstalled(): Boolean = isInstalledDirectory(modelDirectory)
 
+    /**
+     * Verify and load the native model before the user starts a conversion.
+     * The UI calls this during the startup screen so first-tap latency is reduced.
+     */
+    suspend fun warmUp() {
+        operationMutex.lock()
+        var registered = false
+        try {
+            beginSynthesis()
+            registered = true
+            withContext(Dispatchers.IO) {
+                if (!isModelInstalled()) return@withContext
+                verifyInstalledModelIntegrity {}
+                try {
+                    getOrCreateNativeEngine()
+                } catch (error: OutOfMemoryError) {
+                    releaseNativeEngine()
+                    throw IOException("ذاكرة الهاتف غير كافية لتجهيز محرك الصوت. أغلق التطبيقات الأخرى ثم أعد المحاولة.", error)
+                } catch (error: LinkageError) {
+                    releaseNativeEngine()
+                    throw IOException("تعذر تحميل مكتبة محرك الصوت على هذا الجهاز.", error)
+                } catch (error: Exception) {
+                    releaseNativeEngine()
+                    throw IOException("تعذر تهيئة محرك الصوت. أعد فتح التطبيق وحاول مجددًا.", error)
+                }
+            }
+        } finally {
+            if (registered) endSynthesis()
+            operationMutex.unlock()
+        }
+    }
+
     fun needsOptimization(): Boolean = isModelInstalled() &&
         runCatching { File(modelDirectory, ".sawt-verified").readText().trim() == ARCHIVE_SHA256 }
             .getOrDefault(false)
@@ -265,11 +297,12 @@ class SupertonicTtsEngine(context: Context) {
                 val config = GenerationConfig(
                     sid = speakerId,
                     speed = speed.coerceIn(0.8f, 1.2f),
-                    numSteps = 4,
+                    // Two denoising steps prioritize generation speed over maximum fidelity.
+                    numSteps = 2,
                     extra = mapOf("lang" to language)
                 )
                 val chunks = mutableListOf<String>()
-                TextChunker.split(spokenText, MAX_CHUNK_CHARACTERS).forEach { chunk ->
+                TextChunker.split(spokenText, recommendedChunkCharacters()).forEach { chunk ->
                     when {
                         chunk.isBlank() && chunks.isNotEmpty() ->
                             chunks[chunks.lastIndex] = chunks.last() + chunk
@@ -278,7 +311,7 @@ class SupertonicTtsEngine(context: Context) {
                 }
                 if (chunks.isEmpty()) throw IOException("لا يوجد نص صالح للتحويل.")
 
-                onStage("تم تجهيز المحرك. سيُحوّل النص على دفعات صغيرة لتقليل استهلاك الذاكرة.")
+                onStage("تم تجهيز محرك السرعة. سيستخدم الهاتف دفعات أكبر حسب الذاكرة المتاحة.")
                 val output = try {
                     File.createTempFile("sawt-", ".wav", appContext.cacheDir)
                 } catch (error: Exception) {
@@ -389,8 +422,21 @@ class SupertonicTtsEngine(context: Context) {
         activityManager?.getMemoryInfo(memoryInfo)
         return DeviceTuning.recommendedCpuThreads(
             totalMemoryBytes = memoryInfo.totalMem,
+            availableMemoryBytes = memoryInfo.availMem,
             lowRamDevice = activityManager?.isLowRamDevice == true,
             availableProcessors = Runtime.getRuntime().availableProcessors()
+        )
+    }
+
+    private fun recommendedChunkCharacters(): Int {
+        val activityManager =
+            appContext.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        val memoryInfo = ActivityManager.MemoryInfo()
+        activityManager?.getMemoryInfo(memoryInfo)
+        return DeviceTuning.recommendedChunkCharacters(
+            totalMemoryBytes = memoryInfo.totalMem,
+            availableMemoryBytes = memoryInfo.availMem,
+            lowRamDevice = activityManager?.isLowRamDevice == true
         )
     }
 
@@ -405,8 +451,7 @@ class SupertonicTtsEngine(context: Context) {
             ttsJson = "tts.json",
             unicodeIndexer = "unicode_indexer.bin",
             voiceStyle = "voice.bin",
-            // Use one worker on low-memory devices (including typical 2 GB phones),
-            // and at most two workers elsewhere to reduce peak native RAM use.
+            // Use up to four ONNX CPU workers on capable devices; keep a lower-RAM fallback.
             numThreads = recommendedNumThreads()
         )
         return OfflineTts(config = config)
@@ -567,7 +612,6 @@ class SupertonicTtsEngine(context: Context) {
         const val MODEL_DIRECTORY = "sherpa-onnx-supertonic-3-tts-int8-2026-05-11"
         private const val MAX_TEXT_CHARACTERS = 2_000
         private const val MAX_TEXT_BYTES = 5_000
-        private const val MAX_CHUNK_CHARACTERS = 180
         private const val WAV_MINIMUM_BYTES = 44L
         const val ARCHIVE_SHA256 = "82fa96f91c4ef8abaae3a14a3f4153facf88bed821d1f7331cec2700f432c427"
         const val OPTIMIZED_VECTOR_URL =
