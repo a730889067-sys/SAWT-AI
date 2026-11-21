@@ -171,8 +171,12 @@ private fun SawtStudio() {
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            errorMessage = error.message ?: "تعذر تهيئة محرك الصوت."
-            status = "لم تكتمل تهيئة المحرك؛ راجع الملاحظة ثم أعد فتح التطبيق."
+            // Do not lock the studio permanently if startup warm-up fails.
+            // The synthesis action will retry native engine initialization and
+            // report a specific error if the device still cannot load the model.
+            engineWarmed = true
+            errorMessage = error.message ?: "تعذر تهيئة محرك الصوت مسبقًا؛ ستتم إعادة المحاولة عند إنشاء الصوت."
+            status = "يمكن تجربة إنشاء الصوت الآن؛ سيعيد التطبيق محاولة تجهيز المحرك."
         } finally {
             engineWarming = false
         }
