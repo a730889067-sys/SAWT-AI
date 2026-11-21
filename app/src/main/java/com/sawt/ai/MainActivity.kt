@@ -168,6 +168,20 @@ private fun SawtStudio() {
     // Reuse short preview WAVs during this app session instead of synthesizing
     // the same speaker/language/speed combination repeatedly.
     val previewCache = remember { java.util.LinkedHashMap<String, File>(8, 0.75f, true) }
+    var showHelp by remember { mutableStateOf(false) }
+    var showDeleteConfirmation by remember { mutableStateOf(false) }
+    var showVoiceManager by remember { mutableStateOf(false) }
+    var showPerformanceDialog by remember { mutableStateOf(false) }
+    var voiceStorage by remember { mutableStateOf(engine.storageSnapshot()) }
+    var extraVoiceStorageBytes by remember { mutableLongStateOf(0L) }
+    var extraVoicePendingBytes by remember { mutableLongStateOf(0L) }
+    var recordingsStorageBytes by remember { mutableLongStateOf(0L) }
+    var managerStatus by remember { mutableStateOf("جاهز لإدارة حزم الأصوات.") }
+    var pendingVoicePackDelete by remember { mutableStateOf<VoicePack?>(null) }
+    var performanceRunning by remember { mutableStateOf(false) }
+    var performanceStage by remember { mutableStateOf("لم يبدأ الاختبار بعد.") }
+    var performanceError by remember { mutableStateOf<String?>(null) }
+    var performanceReport by remember { mutableStateOf<PerformanceBenchmarkReport?>(null) }
     val controlsLocked = modelLoading || engineWarming || generating || previewing || performanceRunning || voicePackLoadingId != null || voiceCatalogRefreshing
     val selectedVoiceReady = if (selectedVoice.engineId == "nabra") selectedVoice.catalogId in installedPackIds else modelReady
     val selectedVoiceReadyForGeneration = selectedVoiceReady &&
@@ -290,20 +304,7 @@ private fun SawtStudio() {
             engineWarming = false
         }
     }
-    var showHelp by remember { mutableStateOf(false) }
-    var showDeleteConfirmation by remember { mutableStateOf(false) }
-    var showVoiceManager by remember { mutableStateOf(false) }
-    var showPerformanceDialog by remember { mutableStateOf(false) }
-    var voiceStorage by remember { mutableStateOf(engine.storageSnapshot()) }
-    var extraVoiceStorageBytes by remember { mutableLongStateOf(0L) }
-    var extraVoicePendingBytes by remember { mutableLongStateOf(0L) }
-    var recordingsStorageBytes by remember { mutableLongStateOf(0L) }
-    var managerStatus by remember { mutableStateOf("جاهز لإدارة حزم الأصوات.") }
-    var pendingVoicePackDelete by remember { mutableStateOf<VoicePack?>(null) }
-    var performanceRunning by remember { mutableStateOf(false) }
-    var performanceStage by remember { mutableStateOf("لم يبدأ الاختبار بعد.") }
-    var performanceError by remember { mutableStateOf<String?>(null) }
-    var performanceReport by remember { mutableStateOf<PerformanceBenchmarkReport?>(null) }
+
 
     DisposableEffect(engine) {
         onDispose { engine.close() }
@@ -1422,8 +1423,8 @@ private fun SawtStudio() {
 
                             Text("الحزم الصوتية الإضافية", color = Gold, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                             voicePacks.forEach { pack ->
-                                val packBytes = directoryBytes(File(context.filesDir, "sawt-voice-packs/${pack.id}"))
-                                val packPending = directoryPartialBytes(File(context.filesDir, "sawt-voice-packs/${pack.id}"))
+                                val packBytes = extraVoiceStorageBytes
+                                val packPending = extraVoicePendingBytes
                                 val installed = pack.id in installedPackIds
                                 Surface(color = Background, shape = RoundedCornerShape(15.dp), border = BorderStroke(1.dp, Border)) {
                                     Column(Modifier.fillMaxWidth().padding(11.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -1844,3 +1845,51 @@ private fun estimateGenerationMs(
 
 private fun formatHistoryDate(timestamp: Long): String =
     java.text.SimpleDateFormat("yyyy/MM/dd  HH:mm", Locale.getDefault()).format(java.util.Date(timestamp))
+private fun directoryBytes(directory: File): Long =
+    if (!directory.exists()) 0L
+    else directory.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+
+private fun directoryPartialBytes(directory: File): Long =
+    if (!directory.exists()) 0L
+    else directory.walkTopDown()
+        .filter { it.isFile && it.name.endsWith(".part") }
+        .sumOf { it.length() }
+
+private fun formatStorageBytes(bytes: Long): String {
+    val safe = bytes.coerceAtLeast(0L).toDouble()
+    return when {
+        safe >= 1024.0 * 1024.0 * 1024.0 -> String.format(Locale.US, "%.2f GB", safe / (1024.0 * 1024.0 * 1024.0))
+        safe >= 1024.0 * 1024.0 -> String.format(Locale.US, "%.1f MB", safe / (1024.0 * 1024.0))
+        safe >= 1024.0 -> String.format(Locale.US, "%.0f KB", safe / 1024.0)
+        else -> "${bytes.coerceAtLeast(0)} B"
+    }
+}
+
+@Composable
+private fun BenchmarkResultLine(label: String, result: com.sawt.ai.audio.BenchmarkMeasurement) {
+    Surface(
+        color = Background,
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, Border),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(label, color = TextMain, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                Text(formatDuration(result.elapsedMillis), color = Gold, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            }
+            Text(
+                "الخطوات المطلوبة: ${result.requestedSteps} · الفعلية: ${result.effectiveSteps} · الناتج: ${formatStorageBytes(result.outputBytes)}",
+                color = TextMuted,
+                fontSize = 9.sp
+            )
+            Text(
+                "RAM متاحة: ${formatStorageBytes(result.memoryBefore.availableSystemRamBytes)} ← ${formatStorageBytes(result.memoryAfter.availableSystemRamBytes)} · ذاكرة التطبيق PSS: ${result.memoryBefore.processPssKb / 1024} ← ${result.memoryAfter.processPssKb / 1024} MB",
+                color = TextMuted,
+                fontSize = 9.sp,
+                lineHeight = 14.sp
+            )
+        }
+    }
+}
+
