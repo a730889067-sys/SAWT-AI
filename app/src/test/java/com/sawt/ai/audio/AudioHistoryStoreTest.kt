@@ -65,7 +65,7 @@ class AudioHistoryStoreTest {
             out.writeBytes("fmt ")
             out.writeInt(Integer.reverseBytes(16))
             out.writeShort(java.lang.Short.reverseBytes(1.toShort()).toInt())
-            out.writeShort(java.lang.Short.reverseBytes(1))
+            out.writeShort(java.lang.Short.reverseBytes(1.toShort()).toInt())
             out.writeInt(Integer.reverseBytes(24_000))
             out.writeInt(Integer.reverseBytes(48_000))
             out.writeShort(java.lang.Short.reverseBytes(2.toShort()).toInt())
