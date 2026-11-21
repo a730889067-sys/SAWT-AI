@@ -26,13 +26,16 @@ const labelToCombo = [
   "\u064C", "\u064D", "\u0651\u064B", "\u0651\u064C", "\u0651\u064D"
 ];
 
-function normalizeText(value) {
+function normalizeCharacters(value) {
   let text = String(value).normalize("NFC");
   text = Array.from(text, ch => charMap[ch] ?? ch).join("");
-  return text.replace(/[\u200B-\u200F\uFEFF]/g, "").replace(/\s+/g, " ").trim();
+  return text.replace(/[\u200B-\u200F\uFEFF]/g, "");
+}
+function normalizeText(value) {
+  return normalizeCharacters(value).replace(/\s+/g, " ").trim();
 }
 function stripDiacritics(value) {
-  return normalizeText(value).replace(diacritics, "").split(tatweel).join("");
+  return normalizeCharacters(value).replace(diacritics, "").split(tatweel).join("");
 }
 function bytesToHex(bytes) {
   return Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
@@ -118,7 +121,8 @@ async function load() {
 }
 async function diacritize(rawText) {
   await load();
-  const base = stripDiacritics(rawText);
+  const displayBase = stripDiacritics(rawText);
+  const base = normalizeText(rawText);
   if (!base) return rawText;
   const chars = Array.from(base);
   const max = config.max_seq_len ?? 1024;
@@ -131,9 +135,13 @@ async function diacritize(rawText) {
     output = await session.run({ input_ids: input });
     const logits = output.logits?.data;
     if (!logits) throw new Error("نموذج التشكيل لم يُرجع النتائج المتوقعة.");
-    let result = "";
+
+    // Keep original whitespace/newlines: transfer predicted marks by Arabic-letter
+    // order rather than returning the model's whitespace-normalized input.
+    const predictedMarks = [];
     for (let i = 0; i < chars.length; i++) {
       const ch = chars[i];
+      if (!/[\u0621-\u063A\u0641-\u064A]/.test(ch)) continue;
       let best = 0;
       let bestValue = -Infinity;
       const offset = i * config.num_tags;
@@ -144,10 +152,20 @@ async function diacritize(rawText) {
           best = label;
         }
       }
-      const isArabic = /[\u0621-\u063A\u0641-\u064A]/.test(ch);
-      result += ch + (isArabic ? (labelToCombo[best] ?? "") : "");
+      predictedMarks.push(labelToCombo[best] ?? "");
+    }
+
+    let arabicIndex = 0;
+    let result = "";
+    for (const ch of Array.from(displayBase)) {
+      if (/[\u0621-\u063A\u0641-\u064A]/.test(ch)) {
+        result += ch + (predictedMarks[arabicIndex++] ?? "");
+      } else {
+        result += ch;
+      }
     }
     return result;
+
   } finally {
     input.dispose?.();
     if (output) for (const tensor of Object.values(output)) tensor.dispose?.();
