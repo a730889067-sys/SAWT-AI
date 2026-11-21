@@ -180,6 +180,8 @@ class NabraTtsEngine(
         put("repo", pack.repository)
         put("revision", pack.revision)
         put("dtype", pack.dtype)
+        pack.modelUrl?.let { put("modelUrl", it) }
+        pack.voiceUrl?.let { put("voiceUrl", it) }
         put("device", "wasm")
         put("worker", true)
         put("cache", true)
