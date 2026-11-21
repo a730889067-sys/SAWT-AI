@@ -75,4 +75,23 @@ class AudioHistoryStoreTest {
             out.write(ByteArray(256))
         }
     }
+
+    @Test fun prunesOldRecordingsWhenTheLibraryByteLimitIsReached() {
+        val limited = AudioHistoryStore(File(root, "byte-limited"), maxEntries = 10, maxTotalBytes = 350L)
+        val first = limited.add(source, "ar", "M1", "supertonic", 1.0f, 4, "الأقدم", 1L)
+        val latest = limited.add(source, "ar", "M2", "supertonic", 1.0f, 4, "الأحدث", 2L)
+        assertNull(limited.audioFile(first))
+        assertNotNull(limited.audioFile(latest))
+        assertEquals(listOf("الأحدث"), limited.list().map { it.text })
+    }
+
+    @Test fun rejectsOneRecordingLargerThanTheLibraryLimit() {
+        val limited = AudioHistoryStore(File(root, "too-small"), maxEntries = 10, maxTotalBytes = 100L)
+        try {
+            limited.add(source, "ar", "M1", "supertonic", 1.0f, 4, "كبير")
+            fail("Expected the oversized history item to be rejected")
+        } catch (expected: java.io.IOException) {
+            assertTrue(limited.list().isEmpty())
+        }
+    }
 }
