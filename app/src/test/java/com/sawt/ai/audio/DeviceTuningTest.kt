@@ -1,13 +1,15 @@
 package com.sawt.ai.audio
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DeviceTuningTest {
     @Test
-    fun twoGigabytePhoneUsesTwoWorkersWhenMemoryIsAvailable() {
+    fun twoGigabytePhoneUsesOneWorkerToReducePeakMemory() {
         assertEquals(
-            2,
+            1,
             DeviceTuning.recommendedCpuThreads(
                 totalMemoryBytes = 2L * 1024L * 1024L * 1024L,
                 availableMemoryBytes = 900L * 1024L * 1024L,
@@ -18,9 +20,9 @@ class DeviceTuningTest {
     }
 
     @Test
-    fun lowRamPhoneStillUsesTwoWorkersForSpeed() {
+    fun lowRamPhoneUsesOneWorkerEvenWhenSystemMemoryIsAvailable() {
         assertEquals(
-            2,
+            1,
             DeviceTuning.recommendedCpuThreads(
                 totalMemoryBytes = 8L * 1024L * 1024L * 1024L,
                 availableMemoryBytes = 2L * 1024L * 1024L * 1024L,
@@ -83,13 +85,37 @@ class DeviceTuningTest {
     }
 
     @Test
-    fun lowMemoryPhoneGetsModeratelyLargerChunks() {
+    fun twoGigabytePhoneUsesShorterChunks() {
         assertEquals(
-            420,
+            320,
             DeviceTuning.recommendedChunkCharacters(
                 totalMemoryBytes = 2L * 1024L * 1024L * 1024L,
                 availableMemoryBytes = 900L * 1024L * 1024L,
+                lowRamDevice = false
+            )
+        )
+    }
+
+    @Test
+    fun lowRamPhoneUsesShorterChunks() {
+        assertEquals(
+            320,
+            DeviceTuning.recommendedChunkCharacters(
+                totalMemoryBytes = 8L * 1024L * 1024L * 1024L,
+                availableMemoryBytes = 2L * 1024L * 1024L * 1024L,
                 lowRamDevice = true
+            )
+        )
+    }
+
+    @Test
+    fun criticallyLowOrUnknownAvailableMemoryUsesSmallChunks() {
+        assertEquals(
+            240,
+            DeviceTuning.recommendedChunkCharacters(
+                totalMemoryBytes = 8L * 1024L * 1024L * 1024L,
+                availableMemoryBytes = 0L,
+                lowRamDevice = false
             )
         )
     }
@@ -101,6 +127,46 @@ class DeviceTuningTest {
             DeviceTuning.recommendedChunkCharacters(
                 totalMemoryBytes = 8L * 1024L * 1024L * 1024L,
                 availableMemoryBytes = 4L * 1024L * 1024L * 1024L,
+                lowRamDevice = false
+            )
+        )
+    }
+
+    @Test
+    fun smallOrLowRamPhonesDoNotPreloadTheNativeEngine() {
+        assertFalse(
+            DeviceTuning.shouldWarmUp(
+                totalMemoryBytes = 2L * 1024L * 1024L * 1024L,
+                availableMemoryBytes = 900L * 1024L * 1024L,
+                lowRamDevice = false
+            )
+        )
+        assertFalse(
+            DeviceTuning.shouldWarmUp(
+                totalMemoryBytes = 8L * 1024L * 1024L * 1024L,
+                availableMemoryBytes = 2L * 1024L * 1024L * 1024L,
+                lowRamDevice = true
+            )
+        )
+    }
+
+    @Test
+    fun healthyFourGigabytePhoneMayPreloadTheNativeEngine() {
+        assertTrue(
+            DeviceTuning.shouldWarmUp(
+                totalMemoryBytes = 4L * 1024L * 1024L * 1024L,
+                availableMemoryBytes = 1L * 1024L * 1024L * 1024L,
+                lowRamDevice = false
+            )
+        )
+    }
+
+    @Test
+    fun lowAvailableMemoryDisablesNativePreload() {
+        assertFalse(
+            DeviceTuning.shouldWarmUp(
+                totalMemoryBytes = 8L * 1024L * 1024L * 1024L,
+                availableMemoryBytes = 600L * 1024L * 1024L,
                 lowRamDevice = false
             )
         )

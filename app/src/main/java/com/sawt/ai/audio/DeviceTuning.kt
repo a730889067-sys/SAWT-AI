@@ -1,13 +1,24 @@
 package com.sawt.ai.audio
 
 /**
- * Performance-first ONNX CPU policy.
- * Use more native CPU workers and longer inference chunks on capable phones,
- * while retaining a one-worker/short-chunk fallback when free RAM is critically low.
+ * Conservative CPU and memory policy for on-device inference.
+ * Small/low-RAM phones avoid startup preloading and use smaller synthesis chunks.
  */
 internal object DeviceTuning {
     private const val GIB = 1024L * 1024L * 1024L
-    private const val CRITICAL_AVAILABLE_RAM = 512L * 1024L * 1024L
+    private const val MIB = 1024L * 1024L
+    private const val CRITICAL_AVAILABLE_RAM = 512L * MIB
+    private const val PRELOAD_AVAILABLE_RAM = 768L * MIB
+    private const val SMALL_DEVICE_RAM = 5L * GIB / 2L
+
+    fun shouldWarmUp(
+        totalMemoryBytes: Long,
+        availableMemoryBytes: Long,
+        lowRamDevice: Boolean
+    ): Boolean =
+        !lowRamDevice &&
+            totalMemoryBytes >= 4L * GIB &&
+            availableMemoryBytes >= PRELOAD_AVAILABLE_RAM
 
     fun recommendedCpuThreads(
         totalMemoryBytes: Long,
@@ -16,15 +27,16 @@ internal object DeviceTuning {
         availableProcessors: Int
     ): Int {
         val memoryLimit = when {
-            totalMemoryBytes <= 0L -> 2
+            totalMemoryBytes <= 0L -> 1
+            totalMemoryBytes <= SMALL_DEVICE_RAM -> 1
             totalMemoryBytes <= 3L * GIB -> 2
             totalMemoryBytes <= 6L * GIB -> 3
             else -> 4
         }
         val availableLimit = if (
-            availableMemoryBytes in 1L until CRITICAL_AVAILABLE_RAM
+            availableMemoryBytes <= 0L || availableMemoryBytes < CRITICAL_AVAILABLE_RAM
         ) 1 else 4
-        val lowRamLimit = if (lowRamDevice) 2 else 4
+        val lowRamLimit = if (lowRamDevice) 1 else 4
         return minOf(
             availableProcessors.coerceAtLeast(1),
             memoryLimit,
@@ -38,9 +50,10 @@ internal object DeviceTuning {
         availableMemoryBytes: Long,
         lowRamDevice: Boolean
     ): Int = when {
-        availableMemoryBytes in 1L until CRITICAL_AVAILABLE_RAM -> 240
-        lowRamDevice || totalMemoryBytes in 1L..(3L * GIB) -> 420
-        totalMemoryBytes <= 0L || totalMemoryBytes <= 6L * GIB -> 650
+        availableMemoryBytes <= 0L || availableMemoryBytes < CRITICAL_AVAILABLE_RAM -> 240
+        lowRamDevice || totalMemoryBytes in 1L..SMALL_DEVICE_RAM -> 320
+        totalMemoryBytes <= 3L * GIB -> 420
+        totalMemoryBytes <= 6L * GIB -> 650
         else -> 1_000
     }
 }

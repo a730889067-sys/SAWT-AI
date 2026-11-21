@@ -38,6 +38,8 @@ class TashkeelEngine(
     private val nextRequestId = AtomicInteger(1)
     private val pending = ConcurrentHashMap<Int, CancellableContinuation<String>>()
     @Volatile private var closed = false
+    @Volatile private var pageUsable = false
+    @Volatile private var pendingModelRelease: CompletableDeferred<Unit>? = null
     @Volatile private var lastProgressPercent = -1
 
     val webView: WebView = WebView(context)
@@ -102,12 +104,28 @@ class TashkeelEngine(
      * Releases the ONNX WebAssembly worker before audio synthesis to reduce
      * concurrent RAM pressure. The model stays in WebView's local cache.
      */
-    fun releaseModelMemory() {
-        if (closed) return
+    suspend fun releaseModelMemory() {
+        if (closed || !pageUsable) return
+
+        val released = CompletableDeferred<Unit>()
+        pendingModelRelease = released
         webView.post {
-            if (!closed) {
+            if (closed) {
+                released.complete(Unit)
+            } else {
                 webView.evaluateJavascript("window.sawtTashkeel?.dispose?.();", null)
             }
+        }
+
+        try {
+            withTimeout(MODEL_RELEASE_TIMEOUT_MS) { released.await() }
+        } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+            throw IOException(
+                "استغرق تحرير ذاكرة التشكيل وقتًا طويلًا؛ أُوقف التحويل لتجنب ضغط الذاكرة.",
+                timeout
+            )
+        } finally {
+            if (pendingModelRelease === released) pendingModelRelease = null
         }
     }
 
@@ -135,7 +153,13 @@ class TashkeelEngine(
     inner class JsBridge {
         @JavascriptInterface
         fun onPageReady() {
+            pageUsable = true
             if (!pageReady.isCompleted) pageReady.complete(Unit)
+        }
+
+        @JavascriptInterface
+        fun onWorkerDisposed() {
+            pendingModelRelease?.complete(Unit)
         }
 
         @JavascriptInterface
@@ -192,6 +216,8 @@ class TashkeelEngine(
             if (continuation.isActive) continuation.cancel()
         }
         pending.clear()
+        pendingModelRelease?.complete(Unit)
+        pendingModelRelease = null
         mainHandler.post {
             try {
                 (webView.parent as? ViewGroup)?.removeView(webView)
@@ -210,5 +236,6 @@ class TashkeelEngine(
             "https://appassets.androidplatform.net/assets/voice_engine/tashkeel.html"
         private const val PAGE_READY_TIMEOUT_MS = 20_000L
         private const val INFERENCE_TIMEOUT_MS = 180_000L
+        private const val MODEL_RELEASE_TIMEOUT_MS = 10_000L
     }
 }

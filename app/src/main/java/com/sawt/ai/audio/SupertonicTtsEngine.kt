@@ -59,20 +59,24 @@ class SupertonicTtsEngine(context: Context) {
      * Verify and load the native model before the user starts a conversion.
      * The UI calls this during the startup screen so first-tap latency is reduced.
      */
-    suspend fun warmUp() {
+    suspend fun warmUp(): Boolean {
+        // Avoid holding a second large runtime in memory at startup on small phones.
+        if (!shouldWarmUp()) return false
+
         operationMutex.lock()
         var registered = false
         try {
             beginSynthesis()
             registered = true
-            withContext(Dispatchers.IO) {
-                if (!isModelInstalled()) return@withContext
+            return withContext(Dispatchers.IO) {
+                if (!shouldWarmUp() || !isModelInstalled()) return@withContext false
                 verifyInstalledModelIntegrity {}
                 try {
                     getOrCreateNativeEngine()
+                    true
                 } catch (error: OutOfMemoryError) {
                     releaseNativeEngine()
-                    throw IOException("ذاكرة الهاتف غير كافية لتجهيز محرك الصوت. أغلق التطبيقات الأخرى ثم أعد المحاولة.", error)
+                    throw IOException("ذاكرة الهاتف غير كافية لتجهيز محرك الصوت. سيحاول التطبيق التجهيز عند أول تحويل.", error)
                 } catch (error: LinkageError) {
                     releaseNativeEngine()
                     throw IOException("تعذر تحميل مكتبة محرك الصوت على هذا الجهاز.", error)
@@ -413,6 +417,19 @@ class SupertonicTtsEngine(context: Context) {
 
     private fun getOrCreateNativeEngine(): OfflineTts = synchronized(nativeEngineLock) {
         nativeTts ?: createNativeEngine().also { nativeTts = it }
+    }
+
+    private fun shouldWarmUp(): Boolean {
+        val activityManager =
+            appContext.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+                ?: return false
+        val memoryInfo = ActivityManager.MemoryInfo()
+        activityManager.getMemoryInfo(memoryInfo)
+        return DeviceTuning.shouldWarmUp(
+            totalMemoryBytes = memoryInfo.totalMem,
+            availableMemoryBytes = memoryInfo.availMem,
+            lowRamDevice = activityManager.isLowRamDevice
+        )
     }
 
     private fun recommendedNumThreads(): Int {

@@ -180,9 +180,13 @@ private fun SawtStudio() {
         status = "جارٍ تهيئة محرك الصوت السريع قبل أول تحويل…"
         errorMessage = null
         try {
-            engine.warmUp()
+            val preloaded = engine.warmUp()
             engineWarmed = true
-            status = "محرك الصوت جاهز. اكتب النص وابدأ التحويل."
+            status = if (preloaded) {
+                "محرك الصوت جاهز. اكتب النص وابدأ التحويل."
+            } else {
+                "سيُجهّز محرك الصوت عند أول تحويل لتخفيف استهلاك الذاكرة."
+            }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
@@ -679,11 +683,6 @@ private fun SawtStudio() {
                         onClick = {
                             if (!modelReady || input.isBlank()) return@Button
                             val requestText = input.trim()
-                            // Drop the diacritizer's in-memory ONNX/WASM session before loading
-                            // native TTS so both large engines do not compete for phone RAM.
-                            if (language == "ar" && TashkeelTextProcessor.containsArabic(requestText)) {
-                                tashkeelEngine?.releaseModelMemory()
-                            }
                             val requestLanguage = language
                             val requestVoice = selectedVoice
                             val requestSpeed = speed
@@ -701,6 +700,10 @@ private fun SawtStudio() {
                             val startedAt = generationStartedAt
                             scope.launch {
                                 try {
+                                    if (requestLanguage == "ar" && TashkeelTextProcessor.containsArabic(requestText)) {
+                                        generationStage = "جارٍ تحرير ذاكرة التشكيل لتجهيز الصوت…"
+                                        tashkeelEngine?.releaseModelMemory()
+                                    }
                                     val result = engine.synthesizeToFile(
                                         text = requestText,
                                         language = requestLanguage,

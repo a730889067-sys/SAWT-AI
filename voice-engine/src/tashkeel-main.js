@@ -22,10 +22,17 @@ function ensureWorker() {
       native()?.onResult(Number(message.id), String(message.text ?? ""));
     } else if (message.type === "error") {
       postError(Number(message.id ?? -1), message.message);
+    } else if (message.type === "disposed") {
+      if (worker === event.target) worker = null;
+      native()?.onWorkerDisposed();
     }
   };
 
   worker.onerror = event => {
+    const failedWorker = worker;
+    worker = null;
+    try { failedWorker?.terminate(); } catch {}
+    native()?.onWorkerDisposed();
     postError(-1, event.message || "تعطل محرك التشكيل المحلي.");
   };
   return worker;
@@ -51,9 +58,19 @@ window.sawtTashkeel = {
     }
   },
   dispose() {
-    try { worker?.postMessage({ type: "dispose" }); } catch {}
-    try { worker?.terminate(); } catch {}
-    worker = null;
+    const current = worker;
+    if (!current) {
+      native()?.onWorkerDisposed();
+      return;
+    }
+    try {
+      // The worker releases its ONNX session before acknowledging disposal.
+      current.postMessage({ type: "dispose" });
+    } catch {
+      try { current.terminate(); } catch {}
+      if (worker === current) worker = null;
+      native()?.onWorkerDisposed();
+    }
   }
 };
 

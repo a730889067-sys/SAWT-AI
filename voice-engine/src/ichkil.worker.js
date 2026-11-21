@@ -200,6 +200,9 @@ self.onmessage = event => {
     inferenceQueue = inferenceQueue.finally(async () => {
       try { await session?.release(); } catch {}
       session = null;
+      config = null;
+      loading = null;
+      self.postMessage({ type: "disposed" });
       self.close();
     });
   }
