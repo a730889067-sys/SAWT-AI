@@ -12,8 +12,8 @@ android {
   applicationId = "com.sawt.ai"
   minSdk = 26
   targetSdk = 36
-  versionCode = 27
-  versionName = "1.5.19"
+  versionCode = 28
+  versionName = "1.5.20"
   ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
  }
  compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
@@ -40,6 +40,7 @@ dependencies {
  implementation("androidx.compose.material3:material3")
  implementation("androidx.compose.material:material-icons-extended")
  implementation("androidx.core:core-ktx:1.17.0")
+ implementation("androidx.webkit:webkit:1.18.0")
  testImplementation("junit:junit:4.13.2")
  debugImplementation("androidx.compose.ui:ui-tooling")
 }
