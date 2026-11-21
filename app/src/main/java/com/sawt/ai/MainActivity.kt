@@ -101,9 +101,11 @@ private fun SawtStudio() {
     var input by remember { mutableStateOf("") }
     var language by remember { mutableStateOf("ar") }
     var selectedVoice by remember { mutableStateOf(maleVoices.first()) }
-    var speed by remember { mutableFloatStateOf(1.0f) }
+    var speed by remember { mutableFloatStateOf(1.2f) }
     var modelReady by remember { mutableStateOf(engine.isModelInstalled()) }
     var modelLoading by remember { mutableStateOf(false) }
+    var engineWarming by remember { mutableStateOf(false) }
+    var engineWarmed by remember { mutableStateOf(false) }
     var modelProgress by remember { mutableIntStateOf(0) }
     var modelProgressIndeterminate by remember { mutableStateOf(false) }
     var modelStage by remember { mutableStateOf("الأصوات غير مثبتة بعد") }
@@ -122,7 +124,7 @@ private fun SawtStudio() {
     // Reuse short preview WAVs during this app session instead of synthesizing
     // the same speaker/language/speed combination repeatedly.
     val previewCache = remember { java.util.LinkedHashMap<String, File>(8, 0.75f, true) }
-    val controlsLocked = modelLoading || generating || previewing
+    val controlsLocked = modelLoading || engineWarming || generating || previewing
     val metricsPrefs = remember(context) {
         context.getSharedPreferences("sawt_generation_metrics", Context.MODE_PRIVATE)
     }
@@ -152,6 +154,29 @@ private fun SawtStudio() {
 
     var status by remember { mutableStateOf("اكتب نصك، اختر الصوت، ثم أنشئ التسجيل.") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(modelReady, engine) {
+        if (!modelReady) {
+            engineWarmed = false
+            return@LaunchedEffect
+        }
+        engineWarmed = false
+        engineWarming = true
+        status = "جارٍ تهيئة محرك الصوت السريع قبل أول تحويل…"
+        errorMessage = null
+        try {
+            engine.warmUp()
+            engineWarmed = true
+            status = "محرك الصوت جاهز. اكتب النص وابدأ التحويل."
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            errorMessage = error.message ?: "تعذر تهيئة محرك الصوت."
+            status = "لم تكتمل تهيئة المحرك؛ راجع الملاحظة ثم أعد فتح التطبيق."
+        } finally {
+            engineWarming = false
+        }
+    }
     var showHelp by remember { mutableStateOf(false) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
 
@@ -399,7 +424,7 @@ private fun SawtStudio() {
                                 }
                             }
                         },
-                        enabled = modelReady && !modelLoading && !generating && !previewing,
+                        enabled = modelReady && engineWarmed && !modelLoading && !engineWarming && !generating && !previewing,
                         modifier = Modifier.fillMaxWidth().height(46.dp),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Gold),
                         border = BorderStroke(1.dp, GoldSoft)
@@ -434,7 +459,7 @@ private fun SawtStudio() {
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            "سريع وموفّر للذاكرة — مضبوط تلقائيًا ليتناسب مع الهواتف ذات RAM ‏2GB",
+                            "أولوية السرعة: خطوتان للتوليد، وأنوية أكثر ومقاطع أكبر حسب قدرة الهاتف.",
                             color = Gold,
                             fontSize = 11.sp,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 11.dp),
@@ -616,7 +641,7 @@ private fun SawtStudio() {
                                 }
                             }
                         },
-                        enabled = modelReady && !modelLoading && !generating && !previewing && input.isNotBlank(),
+                        enabled = modelReady && engineWarmed && !modelLoading && !engineWarming && !generating && !previewing && input.isNotBlank(),
                         modifier = Modifier.fillMaxWidth().height(58.dp),
                         shape = RoundedCornerShape(18.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -632,7 +657,16 @@ private fun SawtStudio() {
                             Icon(Icons.Default.PlayArrow, contentDescription = null)
                         }
                         Spacer(Modifier.width(9.dp))
-                        Text(if (generating) "جارٍ إنشاء الصوت…" else "إنشاء الصوت والاستماع", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        Text(
+                            when {
+                                generating -> "إنشاء الصوت…"
+                                engineWarming -> "تهيئة المحرك السريع…"
+                                !engineWarmed && modelReady -> "المحرك قيد التجهيز…"
+                                else -> "إنشاء الصوت والاستماع"
+                            },
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        )
                     }
 
                     if (generating || previewing) {
@@ -785,7 +819,7 @@ private fun SawtStudio() {
                             HelpSection("٢. كتابة النص", "المربع الكبير هو مكان الكتابة. اضغط داخله واكتب من لوحة المفاتيح، أو انسخ نصًا من أي مكان ثم اضغط مطولًا داخل المربع واختر «لصق». يمكنك استخدام علامات الترقيم والفواصل وتقسيم النص إلى فقرات. الحد الأقصى 2000 حرف في العملية الواحدة. للأسماء غير الشائعة، أضف التشكيل يدويًا عند الحاجة لتوضيح النطق.")
                             HelpSection("٣. اختيار اللغة", "اختر «العربية» عندما يكون النص عربيًا، واختر English عندما يكون النص إنجليزيًا. الأفضل أن يكون النص بلغة واحدة في كل عملية حتى تكون القراءة أوضح.")
                             HelpSection("٤. اختيار الصوت", "ستجد خمسة أصوات رجالية M1 إلى M5، وخمسة أصوات نسائية F1 إلى F5. اضغط على بطاقة الصوت الذي تريد سماعه. يمكنك تغيير الصوت في أي وقت، وجميعها متاحة للغتين العربية والإنجليزية.")
-                            HelpSection("٥. السرعة والجودة", "حرّك شريط السرعة من 0.8× إلى 1.2×. المحرك يستخدم إعدادًا سريعًا وموفرًا للذاكرة، مع الحفاظ على وضوح النطق.")
+                            HelpSection("٥. السرعة والجودة", "يبدأ التطبيق بسرعة 1.2×، ويستخدم خطوتين للتوليد لتقليل زمن المعالجة. تقليل الخطوات يعطي أولوية للسرعة وقد يؤثر قليلًا في نعومة الصوت مقارنة بالإعدادات الأعلى. يمكنك خفض سرعة القراءة من شريط التحكم.")
                             HelpSection("٦. إنشاء الصوت والاستماع", "بعد كتابة النص واختيار اللغة والصوت، اضغط «إنشاء الصوت والاستماع». سيُنشئ التطبيق ملف WAV على الهاتف ويبدأ تشغيله تلقائيًا. اضغط زر التشغيل الدائري داخل بطاقة الصوت لسماعه مرة أخرى، أو اضغط سهم التنزيل الموجود بجانبه لحفظ الملف.")
                             HelpSection("٧. حفظ الصوت وإيجاده", "بعد الاستماع إلى النتيجة، اضغط سهم التنزيل الموجود بجانب بطاقة الصوت. سيُحفظ الملف بصيغة WAV في تطبيق الملفات داخل: التنزيلات (Download) ثم مجلد SAWT AI. يمكنك فتحه أو مشاركته من هناك.")
                             HelpSection("٨. العمل دون إنترنت والخصوصية", "الإنترنت مطلوب لتنزيل حزمة النماذج أول مرة فقط. بعد اكتمال التثبيت يعمل إنشاء الصوت محليًا على الهاتف دون اتصال، ولا يحتاج إلى خادم مدفوع. لا يرسل التطبيق النص إلى خدمة سحابية أثناء التحويل المحلي.")
