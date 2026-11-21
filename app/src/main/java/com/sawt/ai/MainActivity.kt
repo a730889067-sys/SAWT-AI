@@ -107,7 +107,7 @@ private fun SawtStudio() {
     var inputValue by remember { mutableStateOf(TextFieldValue("")) }
     val input = inputValue.text
     var tashkeelStatus by remember { mutableStateOf("يُضاف التشكيل تلقائيًا بعد التوقف عن الكتابة قليلًا.") }
-    var lastAutoDiacritizedBase by remember { mutableStateOf("") }
+    var lastAutoDiacritizedText by remember { mutableStateOf("") }
     var language by remember { mutableStateOf("ar") }
     var selectedVoice by remember { mutableStateOf(maleVoices.first()) }
     var speed by remember { mutableFloatStateOf(1.2f) }
@@ -213,7 +213,7 @@ private fun SawtStudio() {
             return@LaunchedEffect
         }
         val baseText = TashkeelTextProcessor.stripDiacritics(source)
-        if (baseText.isBlank() || baseText == lastAutoDiacritizedBase) {
+        if (baseText.isBlank() || source == lastAutoDiacritizedText) {
             return@LaunchedEffect
         }
 
@@ -232,7 +232,7 @@ private fun SawtStudio() {
                     )
                     inputValue = TextFieldValue(diacritized, newSelection)
                 }
-                lastAutoDiacritizedBase = TashkeelTextProcessor.stripDiacritics(diacritized)
+                lastAutoDiacritizedText = diacritized
                 tashkeelStatus = "أُضيف التشكيل تلقائيًا. راجع الأسماء وأواخر الإعراب عند الحاجة."
             }
         } catch (cancelled: CancellationException) {
@@ -386,12 +386,12 @@ private fun SawtStudio() {
                                 "Welcome to SAWT AI. Type your text, choose a voice, and listen to the result."
                             }
                             inputValue = TextFieldValue(sampleText, TextRange(sampleText.length))
-                            lastAutoDiacritizedBase = ""
+                            lastAutoDiacritizedText = ""
                             lastFile = null
                         }, enabled = !controlsLocked) { Text("نص تجريبي", color = GoldSoft) }
                         TextButton(onClick = {
                             inputValue = TextFieldValue("")
-                            lastAutoDiacritizedBase = ""
+                            lastAutoDiacritizedText = ""
                             lastFile = null
                         }, enabled = !controlsLocked) { Text("مسح النص", color = TextMuted) }
                     }
@@ -403,13 +403,13 @@ private fun SawtStudio() {
                         LanguageButton("العربية", language == "ar", Modifier.weight(1f), enabled = !controlsLocked) {
                             language = "ar"
                             inputValue = TextFieldValue("")
-                            lastAutoDiacritizedBase = ""
+                            lastAutoDiacritizedText = ""
                             lastFile = null
                         }
                         LanguageButton("English", language == "en", Modifier.weight(1f), enabled = !controlsLocked) {
                             language = "en"
                             inputValue = TextFieldValue("")
-                            lastAutoDiacritizedBase = ""
+                            lastAutoDiacritizedText = ""
                             lastFile = null
                         }
                     }
