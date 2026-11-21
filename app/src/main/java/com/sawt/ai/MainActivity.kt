@@ -29,11 +29,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.edit
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -42,6 +46,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalLayoutDirection
 import com.sawt.ai.audio.SpeechPlaybackService
 import com.sawt.ai.audio.SupertonicTtsEngine
+import com.sawt.ai.audio.TashkeelEngine
+import com.sawt.ai.audio.TashkeelTextProcessor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -98,7 +104,10 @@ private fun SawtStudio() {
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     var showStartup by remember { mutableStateOf(true) }
 
-    var input by remember { mutableStateOf("") }
+    var inputValue by remember { mutableStateOf(TextFieldValue("")) }
+    val input = inputValue.text
+    var tashkeelStatus by remember { mutableStateOf("يُضاف التشكيل تلقائيًا بعد التوقف عن الكتابة قليلًا.") }
+    var lastAutoDiacritizedBase by remember { mutableStateOf("") }
     var language by remember { mutableStateOf("ar") }
     var selectedVoice by remember { mutableStateOf(maleVoices.first()) }
     var speed by remember { mutableFloatStateOf(1.2f) }
@@ -154,6 +163,11 @@ private fun SawtStudio() {
 
     var status by remember { mutableStateOf("اكتب نصك، اختر الصوت، ثم أنشئ التسجيل.") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    val tashkeelEngine = remember(context, showStartup) {
+        if (showStartup) null else TashkeelEngine(context) { message ->
+            mainHandler.post { tashkeelStatus = message }
+        }
+    }
 
     LaunchedEffect(modelReady, engine) {
         if (!modelReady) {
@@ -186,6 +200,46 @@ private fun SawtStudio() {
 
     DisposableEffect(engine) {
         onDispose { engine.close() }
+    }
+
+    DisposableEffect(tashkeelEngine) {
+        onDispose { tashkeelEngine?.close() }
+    }
+
+    LaunchedEffect(input, language, tashkeelEngine) {
+        val processor = tashkeelEngine ?: return@LaunchedEffect
+        val source = input
+        if (language != "ar" || !TashkeelTextProcessor.containsArabic(source)) {
+            return@LaunchedEffect
+        }
+        val baseText = TashkeelTextProcessor.stripDiacritics(source)
+        if (baseText.isBlank() || baseText == lastAutoDiacritizedBase) {
+            return@LaunchedEffect
+        }
+
+        // Debounce inference so typing and keyboard composition stay responsive.
+        delay(850L)
+        if (input != source) return@LaunchedEffect
+        try {
+            tashkeelStatus = "جارٍ إضافة الحركات تلقائيًا…"
+            val diacritized = processor.diacritize(source)
+            if (input == source) {
+                if (diacritized != source) {
+                    val newSelection = TashkeelTextProcessor.mapSelection(
+                        source,
+                        diacritized,
+                        inputValue.selection
+                    )
+                    inputValue = TextFieldValue(diacritized, newSelection)
+                }
+                lastAutoDiacritizedBase = TashkeelTextProcessor.stripDiacritics(diacritized)
+                tashkeelStatus = "أُضيف التشكيل تلقائيًا. راجع الأسماء وأواخر الإعراب عند الحاجة."
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            tashkeelStatus = "لم يكتمل التشكيل التلقائي: ${error.message ?: "تحقق من اتصال الإنترنت لأول تنزيل."}"
+        }
     }
 
     LaunchedEffect(showStartup) {
@@ -239,6 +293,12 @@ private fun SawtStudio() {
                         .verticalScroll(rememberScrollState())
                         .padding(horizontal = 20.dp)
                 ) {
+                    tashkeelEngine?.let { controller ->
+                        AndroidView(
+                            factory = { controller.webView },
+                            modifier = Modifier.size(1.dp).alpha(0f)
+                        )
+                    }
                     Spacer(Modifier.height(22.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -283,11 +343,11 @@ private fun SawtStudio() {
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         OutlinedTextField(
-                            value = input,
+                            value = inputValue,
                             enabled = !controlsLocked,
                             onValueChange = { next ->
-                                if (next.length <= MAX_TEXT_CHARS && next.toByteArray(Charsets.UTF_8).size <= 5000) {
-                                    input = next
+                                if (next.text.length <= MAX_TEXT_CHARS && next.text.toByteArray(Charsets.UTF_8).size <= 5000) {
+                                    inputValue = next
                                     lastFile = null
                                     errorMessage = null
                                 } else {
@@ -307,20 +367,33 @@ private fun SawtStudio() {
                             )
                         )
                     }
+                    Text(
+                        tashkeelStatus,
+                        color = TextMuted,
+                        fontSize = 10.sp,
+                        lineHeight = 16.sp,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp)
+                    )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         TextButton(onClick = {
-                            input = if (language == "ar") {
+                            val sampleText = if (language == "ar") {
                                 "مرحبًا بك في تطبيق ساوت إيه آي. اكتب ما تريد، واختر الصوت الذي يعجبك، ثم استمع إلى النتيجة."
                             } else {
                                 "Welcome to SAWT AI. Type your text, choose a voice, and listen to the result."
                             }
+                            inputValue = TextFieldValue(sampleText, TextRange(sampleText.length))
+                            lastAutoDiacritizedBase = ""
                             lastFile = null
                         }, enabled = !controlsLocked) { Text("نص تجريبي", color = GoldSoft) }
-                        TextButton(onClick = { input = ""; lastFile = null }, enabled = !controlsLocked) { Text("مسح النص", color = TextMuted) }
+                        TextButton(onClick = {
+                            inputValue = TextFieldValue("")
+                            lastAutoDiacritizedBase = ""
+                            lastFile = null
+                        }, enabled = !controlsLocked) { Text("مسح النص", color = TextMuted) }
                     }
 
                     Spacer(Modifier.height(17.dp))
@@ -329,12 +402,14 @@ private fun SawtStudio() {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                         LanguageButton("العربية", language == "ar", Modifier.weight(1f), enabled = !controlsLocked) {
                             language = "ar"
-                            input = ""
+                            inputValue = TextFieldValue("")
+                            lastAutoDiacritizedBase = ""
                             lastFile = null
                         }
                         LanguageButton("English", language == "en", Modifier.weight(1f), enabled = !controlsLocked) {
                             language = "en"
-                            input = ""
+                            inputValue = TextFieldValue("")
+                            lastAutoDiacritizedBase = ""
                             lastFile = null
                         }
                     }
