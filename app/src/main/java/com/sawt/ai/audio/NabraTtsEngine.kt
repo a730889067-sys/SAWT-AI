@@ -2,6 +2,7 @@ package com.sawt.ai.audio
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.app.ActivityManager
 import android.os.Handler
 import android.os.Looper
 import android.webkit.RenderProcessGoneDetail
@@ -107,6 +108,7 @@ class NabraTtsEngine(
         onProgress: (name: String, loaded: Long, total: Long) -> Unit = { _, _, _ -> }
     ) {
         operationMutex.withLock {
+            ensureMemoryBudget()
             ensurePageReady()
             val ready = CompletableDeferred<Unit>()
             pendingReady = ready
@@ -115,6 +117,8 @@ class NabraTtsEngine(
                 evaluate("window.sawtTts?.load?.(${optionsJson(pack)});")
                 withTimeout(LOAD_TIMEOUT_MS) { ready.await() }
                 reportStatus("اكتمل تنزيل وتجهيز ${pack.name}.")
+            } catch (error: OutOfMemoryError) {
+                throw IOException("ذاكرة الهاتف غير كافية لحزمة Nabra الإضافية. استخدم صوت Supertonic الأساسي أو أغلق التطبيقات الأخرى.", error)
             } catch (error: Exception) {
                 throw IOException("تعذر تنزيل أو تجهيز الصوت ${pack.name}: ${error.message}", error)
             } finally {
@@ -150,6 +154,7 @@ class NabraTtsEngine(
         require(text.length <= MAX_TEXT_CHARACTERS) { "قسّم النص إلى فقرات أقصر." }
         operationMutex.lock()
         try {
+            ensureMemoryBudget()
             ensurePageReady()
             val result = CompletableDeferred<File>()
             pendingAudio = result
@@ -160,6 +165,9 @@ class NabraTtsEngine(
                     "${speed.coerceIn(0.8f, 1.2f)}, ${optionsJson(pack)});"
                 evaluate(script)
                 return withTimeout(GENERATION_TIMEOUT_MS) { result.await() }
+            } catch (error: OutOfMemoryError) {
+                try { bridge.cancelAudio() } catch (_: Exception) { }
+                throw IOException("نفدت الذاكرة أثناء توليد Nabra. استخدم صوت Supertonic أو أغلق التطبيقات الأخرى.", error)
             } catch (error: Exception) {
                 throw IOException("تعذر إنشاء الصوت الفصيح الإضافي: ${error.message}", error)
             } finally {
@@ -168,6 +176,19 @@ class NabraTtsEngine(
             }
         } finally {
             operationMutex.unlock()
+        }
+    }
+
+
+    private fun ensureMemoryBudget() {
+        val activityManager = appContext.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+            ?: throw IOException("تعذر قراءة ذاكرة الهاتف؛ تم تعطيل حزمة Nabra التجريبية لتجنب الإغلاق.")
+        val info = ActivityManager.MemoryInfo()
+        activityManager.getMemoryInfo(info)
+        val minimumTotal = 3L * 1024L * 1024L * 1024L
+        val minimumAvailable = 768L * 1024L * 1024L
+        if (activityManager.isLowRamDevice || info.totalMem < minimumTotal || info.availMem < minimumAvailable) {
+            throw IOException("حزمة Nabra تحتاج هاتفًا بذاكرة 3 GB على الأقل و768 MB متاحة تقريبًا. استخدم أحد أصوات Supertonic على هذا الجهاز.")
         }
     }
 
