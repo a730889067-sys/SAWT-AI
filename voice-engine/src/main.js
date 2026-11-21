@@ -23,12 +23,23 @@ function normalizedOptions(options = {}) {
   const repo = String(options.repo || DEFAULT_PACK.repo);
   const revision = String(options.revision || DEFAULT_PACK.revision);
   const dtype = options.dtype === "fp32" ? "fp32" : "fp16";
-  // The native catalog validates model host/repository/revision before it reaches
-  // this page. The JS bridge accepts only pinned Nabra-family repository values.
+  // Android downloads pinned model files into private storage first. The WebView
+  // is allowed to fetch only those files through its internal asset origin.
+  const localPrefix = "https://appassets.androidplatform.net/models/";
+  const localModelPattern = /^https:\/\/appassets\.androidplatform\.net\/models\/[a-z0-9][a-z0-9-]{2,60}\/(?:onnx\/model(?:_fp16)?\.onnx|voices\/af_msa\.bin)$/;
+  const modelUrl = String(options.modelUrl || "");
+  const voiceUrl = String(options.voiceUrl || "");
   if (repo !== DEFAULT_PACK.repo || !/^[a-f0-9]{40}$/i.test(revision)) {
     throw new Error("حزمة الصوت غير معتمدة أو أن إصدارها غير مثبت.");
   }
-  return { repo, revision, dtype, device: "wasm" };
+  if (options.localModels !== true ||
+      !modelUrl.startsWith(localPrefix) ||
+      !voiceUrl.startsWith(localPrefix) ||
+      !localModelPattern.test(modelUrl) ||
+      !localModelPattern.test(voiceUrl)) {
+    throw new Error("ملفات حزمة الصوت المحلية غير جاهزة أو أن مسارها غير معتمد.");
+  }
+  return { repo, revision, dtype, device: "wasm", modelUrl, voiceUrl, localModels: true };
 }
 function packKey(options) {
   return [options.repo, options.revision, options.dtype].join("@");
@@ -50,7 +61,9 @@ async function load(options = {}) {
     const engine = await NabraTTS.load({
       ...safe,
       worker: true,
-      cache: true,
+      // Model and voice files have already been downloaded with resumable HTTP
+      // transfers by the Android layer; avoid making a duplicate WebView cache.
+      cache: !safe.localModels,
       numThreads: 1,
       wasmPaths: new URL("./wasm/", window.location.href).href,
       normalize: false,
