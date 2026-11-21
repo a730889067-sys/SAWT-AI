@@ -656,7 +656,7 @@ class SupertonicTtsEngine(context: Context) {
         try {
             connection.connect()
             val status = connection.responseCode
-            if (status == HttpURLConnection.HTTP_REQUESTED_RANGE_NOT_SATISFIABLE &&
+            if (status == 416 &&
                 partFile.isFile && partFile.length() >= asset.minimumBytes &&
                 calculateSha256(partFile).equals(asset.sha256, ignoreCase = true)
             ) {
