@@ -76,7 +76,7 @@ internal object DeviceTuning {
             lowRamDevice || totalMemoryBytes <= 0L ||
                 totalMemoryBytes <= SMALL_DEVICE_RAM ||
                 availableMemoryBytes <= CRITICAL_AVAILABLE_RAM -> 4
-            totalMemoryBytes < 4L * GIB || availableMemoryBytes < GIB -> 6
+            totalMemoryBytes <= 4L * GIB || availableMemoryBytes < GIB -> 6
             else -> 8
         }
         return minOf(requested, maxSafeSteps)
