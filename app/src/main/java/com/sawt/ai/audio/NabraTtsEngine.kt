@@ -34,6 +34,7 @@ class NabraTtsEngine(
     @Volatile private var rendererGone = false
     @Volatile private var pendingAudio: CompletableDeferred<File>? = null
     @Volatile private var pendingReady: CompletableDeferred<Unit>? = null
+    @Volatile private var pendingRelease: CompletableDeferred<Unit>? = null
     @Volatile private var currentProgress: ((String, Long, Long) -> Unit)? = null
 
     private val bridge = NabraLocalBridge(appContext) { event -> handleEvent(event) }
@@ -123,6 +124,22 @@ class NabraTtsEngine(
         }
     }
 
+    suspend fun releaseRuntime() {
+        operationMutex.withLock {
+            ensurePageReady()
+            val released = CompletableDeferred<Unit>()
+            pendingRelease = released
+            try {
+                evaluate("window.sawtTts?.releaseRuntime?.();")
+                withTimeout(RELEASE_TIMEOUT_MS) { released.await() }
+            } catch (error: Exception) {
+                throw IOException("تعذر تحرير ذاكرة الصوت الإضافي: ${error.message}", error)
+            } finally {
+                if (pendingRelease === released) pendingRelease = null
+            }
+        }
+    }
+
     suspend fun synthesizeToFile(
         text: String,
         pack: VoicePack,
@@ -195,6 +212,7 @@ class NabraTtsEngine(
                 pendingReady?.completeExceptionally(error)
             }
             NabraBridgeEvent.ModelsRemoved -> reportStatus("حُذفت ملفات الصوت الإضافية.")
+            NabraBridgeEvent.RuntimeReleased -> pendingRelease?.complete(Unit)
         }
     }
 
@@ -210,6 +228,8 @@ class NabraTtsEngine(
         pendingAudio = null
         pendingReady?.completeExceptionally(error)
         pendingReady = null
+        pendingRelease?.completeExceptionally(error)
+        pendingRelease = null
         bridge.close()
         mainHandler.post {
             try { (webView.parent as? android.view.ViewGroup)?.removeView(webView) } catch (_: Exception) { }
@@ -227,6 +247,7 @@ class NabraTtsEngine(
         private const val PAGE_READY_TIMEOUT_MS = 20_000L
         private const val LOAD_TIMEOUT_MS = 180_000L
         private const val GENERATION_TIMEOUT_MS = 180_000L
+        private const val RELEASE_TIMEOUT_MS = 15_000L
         private const val MAX_TEXT_CHARACTERS = 2_000
     }
 }
