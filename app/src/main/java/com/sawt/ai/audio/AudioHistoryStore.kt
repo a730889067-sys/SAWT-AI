@@ -56,7 +56,8 @@ class AudioHistoryStore(private val root: File, private val maxEntries: Int = 10
         if (text.isBlank() || text.length > MAX_TEXT_CHARS || text.toByteArray(StandardCharsets.UTF_8).size > MAX_TEXT_BYTES) {
             throw IOException("النص المحفوظ يتجاوز الحد الآمن.")
         }
-        if (!speed.isFinite() || qualitySteps !in setOf(2, 4, 6, 8)) {
+        val validQuality = if (engineId == "nabra") qualitySteps == 0 else qualitySteps in setOf(2, 4, 6, 8)
+        if (!speed.isFinite() || !validQuality) {
             throw IOException("إعدادات التسجيل غير صالحة.")
         }
         if (voiceName.isBlank() || engineId !in setOf("supertonic", "nabra")) {
@@ -147,7 +148,8 @@ class AudioHistoryStore(private val root: File, private val maxEntries: Int = 10
         )
         if (!isSafeId(entry.id) || entry.language !in setOf("ar", "en") ||
             entry.engineId !in setOf("supertonic", "nabra") ||
-            !entry.speed.isFinite() || entry.qualitySteps !in setOf(2, 4, 6, 8) ||
+            !entry.speed.isFinite() ||
+            !(if (entry.engineId == "nabra") entry.qualitySteps == 0 else entry.qualitySteps in setOf(2, 4, 6, 8)) ||
             entry.text.isBlank() || entry.text.length > MAX_TEXT_CHARS
         ) return null
         return entry
