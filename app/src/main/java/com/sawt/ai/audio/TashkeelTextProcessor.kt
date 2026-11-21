@@ -13,17 +13,17 @@ internal object TashkeelTextProcessor {
     private val zeroWidth = Regex("[\\u200B-\\u200F\\uFEFF]")
 
     fun containsArabic(text: String): Boolean =
-        text.any { it in '\\u0621'..'\\u063A' || it in '\\u0641'..'\\u064A' }
+        text.any { it in '\u0621'..'\u063A' || it in '\u0641'..'\u064A' }
 
     fun stripDiacritics(text: String): String =
-        zeroWidth.replace(marks.replace(text, ""), "").replace("\\u0640", "")
+        zeroWidth.replace(marks.replace(text, ""), "").replace("\u0640", "")
 
     fun split(text: String, maxCharacters: Int = MAX_CHUNK_CHARACTERS): List<String> {
         require(maxCharacters > 0) { "maxCharacters must be positive" }
         if (text.isEmpty()) return emptyList()
         if (text.length <= maxCharacters) return listOf(text)
 
-        val boundaries = setOf('،', '؛', '.', '!', '?', '؟', '\\n', '\\r')
+        val boundaries = setOf('،', '؛', '.', '!', '?', '؟', '\n', '\r')
         val chunks = ArrayList<String>((text.length / maxCharacters) + 1)
         var start = 0
         while (start < text.length) {
