@@ -886,61 +886,99 @@ private fun SawtStudio() {
                     Spacer(Modifier.height(20.dp))
                     Button(
                         onClick = {
-                            if (!modelReady || input.isBlank()) return@Button
+                            if (!selectedVoiceReady || input.isBlank()) return@Button
                             val requestText = input.trim()
                             val requestLanguage = language
                             val requestVoice = selectedVoice
                             val requestSpeed = speed
+                            val requestSteps = requestedNumSteps
                             generating = true
                             saving = false
                             lastFile = null
                             errorMessage = null
-                            status = "جارٍ إنشاء الصوت على الهاتف…"
+                            status = "جارٍ إنشاء التسجيل…"
                             generationStartedAt = SystemClock.elapsedRealtime()
                             remainingEstimateBaseMs = estimateGenerationMs(metricsPrefs, requestLanguage, requestSpeed, requestText.length)
                             generationRemainingMs = remainingEstimateBaseMs
                             remainingEstimateUpdatedAt = generationStartedAt
-                            hasRemainingEstimate = generationRemainingMs > 0L
+                            hasRemainingEstimate = requestVoice.engineId == "supertonic" && generationRemainingMs > 0L
                             generationStage = "جارٍ تجهيز محرك الصوت…"
                             val startedAt = generationStartedAt
                             scope.launch {
                                 try {
-                                    if (requestLanguage == "ar" && TashkeelTextProcessor.containsArabic(requestText)) {
-                                        generationStage = "جارٍ تحرير ذاكرة التشكيل لتجهيز الصوت…"
+                                    val result = if (requestVoice.engineId == "nabra") {
+                                        val pack = voicePacks.firstOrNull { it.id == requestVoice.catalogId }
+                                            ?: throw IOException("حزمة الصوت غير موجودة في المكتبة.")
+                                        generationStage = "جارٍ تجهيز الصوت الفصيح الإضافي…"
                                         tashkeelEngine?.releaseModelMemory()
-                                    }
-                                    val result = engine.synthesizeToFile(
-                                        text = requestText,
-                                        language = requestLanguage,
-                                        speakerId = requestVoice.speakerId,
-                                        speed = requestSpeed,
-                                        onStage = { stage -> mainHandler.post { generationStage = stage } },
-                                        onProgress = { completed, total ->
-                                            updateRemainingEstimate(completed, total, startedAt, requestLanguage, requestSpeed)
+                                        engine.releaseNativeModel()
+                                        ensureNabraEngine().synthesizeToFile(
+                                            requestText,
+                                            pack,
+                                            requestSpeed,
+                                            onProgress = { name, loaded, total ->
+                                                val detail = if (total > 0L) {
+                                                    "$name · ${(loaded * 100L / total).toInt().coerceIn(0, 100)}%"
+                                                } else name
+                                                mainHandler.post { generationStage = detail }
+                                            }
+                                        )
+                                    } else {
+                                        nabraEngine?.releaseRuntime()
+                                        if (requestLanguage == "ar" && TashkeelTextProcessor.containsArabic(requestText)) {
+                                            generationStage = "جارٍ تحرير ذاكرة التشكيل لتجهيز الصوت…"
+                                            tashkeelEngine?.releaseModelMemory()
                                         }
-                                    )
+                                        engine.synthesizeToFile(
+                                            text = requestText,
+                                            language = requestLanguage,
+                                            speakerId = requestVoice.speakerId,
+                                            speed = requestSpeed,
+                                            requestedNumSteps = requestSteps,
+                                            onStage = { stage -> mainHandler.post { generationStage = stage } },
+                                            onProgress = { completed, total ->
+                                                updateRemainingEstimate(completed, total, startedAt, requestLanguage, requestSpeed)
+                                            }
+                                        )
+                                    }
                                     val elapsedMs = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L)
                                     val sampleRate = elapsedMs.toFloat() / requestText.length.coerceAtLeast(1)
-                                    val prefKey = generationRateKey(requestLanguage, requestSpeed)
+                                    val prefKey = "${requestVoice.engineId}_${generationRateKey(requestLanguage, requestSpeed)}"
                                     val oldRate = metricsPrefs.getFloat(prefKey, 0f)
                                     val smoothRate = if (oldRate > 0f) oldRate * 0.7f + sampleRate * 0.3f else sampleRate
                                     metricsPrefs.edit { putFloat(prefKey, smoothRate) }
-                                    lastFile = result
+
+                                    val saved = withContext(Dispatchers.IO) {
+                                        val entry = historyStore.add(
+                                            source = result,
+                                            language = requestLanguage,
+                                            voiceName = requestVoice.name,
+                                            engineId = requestVoice.engineId,
+                                            speed = requestSpeed,
+                                            qualitySteps = if (requestVoice.engineId == "nabra") 0 else requestSteps,
+                                            text = requestText
+                                        )
+                                        Triple(entry, historyStore.audioFile(entry), historyStore.list())
+                                    }
+                                    historyEntries = saved.third
+                                    val durableFile = saved.second ?: result
+                                    lastFile = durableFile
                                     lastVoiceName = requestVoice.name
                                     lastLanguageName = if (requestLanguage == "ar") "العربية" else "English"
-                                    SpeechPlaybackService.playFile(context, result.absolutePath)
-                                    status = "اكتمل إنشاء الصوت وبدأ تشغيله."
+                                    SpeechPlaybackService.playFile(context, durableFile.absolutePath)
+                                    status = "اكتمل التسجيل، وحُفظ في مكتبتك الصوتية."
                                 } catch (cancelled: CancellationException) {
                                     throw cancelled
                                 } catch (error: Exception) {
                                     errorMessage = error.message ?: "تعذر إنشاء الصوت."
-                                    status = "تحتاج العملية إلى مراجعة بسيطة؛ يمكنك المحاولة بعد معالجة السبب الموضح."
+                                    status = "لم تكتمل العملية. راجع الملاحظة ثم أعد المحاولة."
                                 } finally {
                                     generating = false
                                 }
                             }
                         },
-                        enabled = modelReady && engineWarmed && !modelLoading && !engineWarming && !generating && !previewing && !tashkeelWorking && input.isNotBlank(),
+                        },
+                        enabled = selectedVoiceReadyForGeneration && !modelLoading && !engineWarming && !generating && !previewing && !tashkeelWorking && voicePackLoadingId == null && input.isNotBlank(),
                         modifier = Modifier.fillMaxWidth().height(58.dp),
                         shape = RoundedCornerShape(18.dp),
                         colors = ButtonDefaults.buttonColors(
