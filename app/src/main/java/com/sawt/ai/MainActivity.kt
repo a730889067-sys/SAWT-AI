@@ -49,7 +49,10 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import com.sawt.ai.audio.AudioHistoryEntry
 import com.sawt.ai.audio.AudioHistoryStore
 import com.sawt.ai.audio.NabraTtsEngine
+import com.sawt.ai.audio.PerformanceBenchmark
+import com.sawt.ai.audio.PerformanceBenchmarkReport
 import com.sawt.ai.audio.SpeechPlaybackService
+import com.sawt.ai.audio.SupertonicStorageSnapshot
 import com.sawt.ai.audio.SupertonicTtsEngine
 import com.sawt.ai.audio.TashkeelEngine
 import com.sawt.ai.audio.TashkeelTextProcessor
@@ -165,7 +168,7 @@ private fun SawtStudio() {
     // Reuse short preview WAVs during this app session instead of synthesizing
     // the same speaker/language/speed combination repeatedly.
     val previewCache = remember { java.util.LinkedHashMap<String, File>(8, 0.75f, true) }
-    val controlsLocked = modelLoading || engineWarming || generating || previewing || voicePackLoadingId != null || voiceCatalogRefreshing
+    val controlsLocked = modelLoading || engineWarming || generating || previewing || performanceRunning || voicePackLoadingId != null || voiceCatalogRefreshing
     val selectedVoiceReady = if (selectedVoice.engineId == "nabra") selectedVoice.catalogId in installedPackIds else modelReady
     val selectedVoiceReadyForGeneration = selectedVoiceReady &&
         (selectedVoice.engineId == "nabra" || engineWarmed)
@@ -209,6 +212,48 @@ private fun SawtStudio() {
             }
         }.also { nabraEngine = it }
     }
+
+    suspend fun refreshVoiceStorage() {
+        val snapshot = withContext(Dispatchers.IO) { engine.storageSnapshot() }
+        val root = File(context.filesDir, "sawt-voice-packs")
+        val packBytes = withContext(Dispatchers.IO) { directoryBytes(root) }
+        val partialBytes = withContext(Dispatchers.IO) {
+            root.walkTopDown()
+                .filter { it.isFile && it.name.endsWith(".part") }
+                .sumOf { it.length() }
+        }
+        val historyBytes = withContext(Dispatchers.IO) {
+            directoryBytes(File(context.filesDir, "audio_history"))
+        }
+        voiceStorage = snapshot
+        extraVoiceStorageBytes = packBytes
+        extraVoicePendingBytes = partialBytes
+        recordingsStorageBytes = historyBytes
+    }
+
+    fun startPerformanceBenchmark() {
+        if (performanceRunning || !modelReady || modelLoading || generating || previewing) return
+        performanceRunning = true
+        performanceError = null
+        performanceReport = null
+        performanceStage = "تهيئة الاختبار…"
+        scope.launch {
+            try {
+                performanceReport = PerformanceBenchmark(context, engine).run { stage ->
+                    mainHandler.post { performanceStage = stage }
+                }
+                performanceStage = "اكتمل الاختبار."
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                performanceError = error.message ?: "تعذر إكمال اختبار الأداء."
+                performanceStage = "توقف الاختبار."
+            } finally {
+                performanceRunning = false
+                refreshVoiceStorage()
+            }
+        }
+    }
     val tashkeelEngine = remember(context, showStartup) {
         if (showStartup) null else TashkeelEngine(context) { message ->
             mainHandler.post { tashkeelStatus = message }
@@ -247,6 +292,18 @@ private fun SawtStudio() {
     }
     var showHelp by remember { mutableStateOf(false) }
     var showDeleteConfirmation by remember { mutableStateOf(false) }
+    var showVoiceManager by remember { mutableStateOf(false) }
+    var showPerformanceDialog by remember { mutableStateOf(false) }
+    var voiceStorage by remember { mutableStateOf(engine.storageSnapshot()) }
+    var extraVoiceStorageBytes by remember { mutableLongStateOf(0L) }
+    var extraVoicePendingBytes by remember { mutableLongStateOf(0L) }
+    var recordingsStorageBytes by remember { mutableLongStateOf(0L) }
+    var managerStatus by remember { mutableStateOf("جاهز لإدارة حزم الأصوات.") }
+    var pendingVoicePackDelete by remember { mutableStateOf<VoicePack?>(null) }
+    var performanceRunning by remember { mutableStateOf(false) }
+    var performanceStage by remember { mutableStateOf("لم يبدأ الاختبار بعد.") }
+    var performanceError by remember { mutableStateOf<String?>(null) }
+    var performanceReport by remember { mutableStateOf<PerformanceBenchmarkReport?>(null) }
 
     DisposableEffect(engine) {
         onDispose { engine.close() }
@@ -404,7 +461,40 @@ private fun SawtStudio() {
                     Text("حوّل النص إلى تسجيل", color = TextMain, fontSize = 25.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(7.dp))
                     Text("تحكّم في النبرة والجودة، واحتفظ بتسجيلاتك", color = TextMuted, fontSize = 13.sp)
-                    Spacer(Modifier.height(24.dp))
+                    Spacer(Modifier.height(14.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                showVoiceManager = true
+                                scope.launch { refreshVoiceStorage() }
+                            },
+                            enabled = !controlsLocked,
+                            modifier = Modifier.weight(1f).height(43.dp),
+                            contentPadding = PaddingValues(horizontal = 5.dp),
+                            border = BorderStroke(1.dp, GoldSoft),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Gold)
+                        ) {
+                            Text("مدير الأصوات", fontSize = 11.sp)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                performanceReport = null
+                                performanceError = null
+                                showPerformanceDialog = true
+                            },
+                            enabled = modelReady && !controlsLocked,
+                            modifier = Modifier.weight(1f).height(43.dp),
+                            contentPadding = PaddingValues(horizontal = 5.dp),
+                            border = BorderStroke(1.dp, Border),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = TextMuted)
+                        ) {
+                            Text("اختبار الأداء", fontSize = 11.sp)
+                        }
+                    }
+                    Spacer(Modifier.height(22.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("١. اكتب النص", color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.weight(1f))
@@ -1245,6 +1335,257 @@ private fun SawtStudio() {
                 }
             }
 
+            if (showVoiceManager) {
+                AlertDialog(
+                    onDismissRequest = { if (!modelLoading && voicePackLoadingId == null) showVoiceManager = false },
+                    containerColor = SurfaceDark,
+                    title = { Text("مدير الأصوات والتنزيلات", color = Gold, fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column(
+                            modifier = Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(9.dp)
+                        ) {
+                            Text("إدارة الملفات الصوتية واستكمال التنزيلات المتوقفة.", color = TextMain, fontSize = 12.sp)
+                            Surface(color = Background, shape = RoundedCornerShape(15.dp), border = BorderStroke(1.dp, Border)) {
+                                Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    Text("حزمة Supertonic الأساسية", color = Gold, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                    Text(
+                                        if (voiceStorage.isInstalled) "مثبتة وجاهزة للاستخدام دون إنترنت."
+                                        else if (voiceStorage.pendingBytes > 0L) "يوجد تنزيل غير مكتمل؛ يمكنك استكماله."
+                                        else "غير مثبتة على الجهاز.",
+                                        color = TextMain,
+                                        fontSize = 11.sp
+                                    )
+                                    Text("الحجم المثبت: ${formatStorageBytes(voiceStorage.installedBytes)}", color = TextMuted, fontSize = 10.sp)
+                                    Text("ملفات قيد التنزيل: ${formatStorageBytes(voiceStorage.pendingBytes)}", color = TextMuted, fontSize = 10.sp)
+                                    Text("المساحة الفارغة: ${formatStorageBytes(voiceStorage.availableBytes)}", color = TextMuted, fontSize = 10.sp)
+                                    if (modelLoading) {
+                                        LinearProgressIndicator(
+                                            progress = { (modelProgress / 100f).coerceIn(0f, 1f) },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            color = Gold,
+                                            trackColor = SurfaceRaised
+                                        )
+                                        Text(modelStage, color = GoldSoft, fontSize = 10.sp)
+                                    }
+                                    Button(
+                                        onClick = {
+                                            if (modelLoading) return@Button
+                                            modelLoading = true
+                                            modelProgress = 0
+                                            managerStatus = "جارٍ تنزيل أو استكمال حزمة Supertonic…"
+                                            scope.launch {
+                                                try {
+                                                    engine.downloadAndInstall(
+                                                        onProgress = { loaded, total ->
+                                                            mainHandler.post {
+                                                                modelProgress = if (total > 0L) {
+                                                                    ((loaded * 100L) / total).toInt().coerceIn(0, 100)
+                                                                } else 0
+                                                            }
+                                                        },
+                                                        onStage = { stage -> mainHandler.post { modelStage = stage; managerStatus = stage } }
+                                                    )
+                                                    modelReady = engine.isModelInstalled()
+                                                    managerStatus = "حزمة Supertonic جاهزة."
+                                                } catch (error: Exception) {
+                                                    managerStatus = error.message ?: "تعذر تنزيل حزمة Supertonic."
+                                                } finally {
+                                                    modelLoading = false
+                                                    refreshVoiceStorage()
+                                                }
+                                            }
+                                        },
+                                        enabled = !modelLoading && !generating && !previewing && !performanceRunning,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = Background)
+                                    ) {
+                                        Text(
+                                            when {
+                                                modelLoading -> "جارٍ التنزيل…"
+                                                voiceStorage.pendingBytes > 0L -> "استكمال التنزيل"
+                                                voiceStorage.isInstalled -> "فحص / تحديث تحسين السرعة"
+                                                else -> "تنزيل حزمة Supertonic"
+                                            }
+                                        )
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            showVoiceManager = false
+                                            showDeleteConfirmation = true
+                                        },
+                                        enabled = voiceStorage.isInstalled && !modelLoading && !controlsLocked,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) { Text("حذف حزمة Supertonic", color = Color(0xFFE1A7A7)) }
+                                }
+                            }
+
+                            Text("الحزم الصوتية الإضافية", color = Gold, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            voicePacks.forEach { pack ->
+                                val packBytes = directoryBytes(File(context.filesDir, "sawt-voice-packs/${pack.id}"))
+                                val packPending = directoryPartialBytes(File(context.filesDir, "sawt-voice-packs/${pack.id}"))
+                                val installed = pack.id in installedPackIds
+                                Surface(color = Background, shape = RoundedCornerShape(15.dp), border = BorderStroke(1.dp, Border)) {
+                                    Column(Modifier.fillMaxWidth().padding(11.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                        Text(pack.name, color = TextMain, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                        Text(pack.description, color = TextMuted, fontSize = 10.sp, lineHeight = 15.sp)
+                                        Text("المساحة المستخدمة: ${formatStorageBytes(packBytes)}", color = TextMuted, fontSize = 10.sp)
+                                        if (packPending > 0L) {
+                                            Text("تنزيل محفوظ للاستكمال: ${formatStorageBytes(packPending)}", color = GoldSoft, fontSize = 10.sp)
+                                        }
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                if (installed) "مثبتة" else if (packPending > 0L) "تنزيل متوقف" else "غير مثبتة",
+                                                color = if (installed) Gold else TextMuted,
+                                                fontSize = 10.sp,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            if (pack.downloadable && !installed) {
+                                                TextButton(
+                                                    onClick = {
+                                                        if (voicePackLoadingId != null) return@TextButton
+                                                        voicePackLoadingId = pack.id
+                                                        managerStatus = "جارٍ تنزيل أو استكمال ${pack.name}…"
+                                                        scope.launch {
+                                                            try {
+                                                                ensureNabraEngine().prepare(pack) { name, loaded, total ->
+                                                                    mainHandler.post {
+                                                                        managerStatus = if (total > 0L) {
+                                                                            "$name · ${(loaded * 100L / total).toInt().coerceIn(0, 100)}%"
+                                                                        } else "$name · ${formatStorageBytes(loaded)}"
+                                                                    }
+                                                                }
+                                                                voicePackPrefs.edit { putBoolean("installed_${pack.id}", true) }
+                                                                installedPackIds = installedPackIds + pack.id
+                                                                selectedVoice = VoiceStyle(pack.name, -1, "فصحى · إضافي", "nabra", pack.id)
+                                                                language = "ar"
+                                                                managerStatus = "اكتمل تنزيل ${pack.name} وأصبح متاحًا دون إنترنت."
+                                                                refreshVoiceStorage()
+                                                            } catch (error: Exception) {
+                                                                managerStatus = error.message ?: "تعذر تنزيل الحزمة."
+                                                            } finally {
+                                                                voicePackLoadingId = null
+                                                            }
+                                                        }
+                                                    },
+                                                    enabled = !controlsLocked && !modelLoading
+                                                ) {
+                                                    Text(if (voicePackLoadingId == pack.id) "جارٍ…" else if (packPending > 0L) "استكمال" else "تنزيل", color = Gold)
+                                                }
+                                            } else if (installed || packBytes > 0L) {
+                                                TextButton(
+                                                    onClick = { pendingVoicePackDelete = pack },
+                                                    enabled = !controlsLocked && !modelLoading
+                                                ) { Text("حذف", color = Color(0xFFE1A7A7)) }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Divider(color = Border)
+                            Text("التسجيلات المحفوظة: ${formatStorageBytes(recordingsStorageBytes)}", color = TextMuted, fontSize = 10.sp)
+                            Text("حذف حزمة صوت لا يحذف مكتبة التسجيلات أو ملفات WAV.", color = GoldSoft, fontSize = 10.sp)
+                            Text(managerStatus, color = TextMuted, fontSize = 10.sp)
+                            TextButton(
+                                onClick = { scope.launch { refreshVoiceStorage(); managerStatus = "تم تحديث معلومات التخزين." } },
+                                enabled = !modelLoading && voicePackLoadingId == null
+                            ) { Text("تحديث معلومات التخزين", color = Gold) }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { showVoiceManager = false }, enabled = !modelLoading && voicePackLoadingId == null) {
+                            Text("إغلاق", color = Gold)
+                        }
+                    }
+                )
+            }
+
+            if (pendingVoicePackDelete != null) {
+                AlertDialog(
+                    onDismissRequest = { pendingVoicePackDelete = null },
+                    containerColor = SurfaceDark,
+                    title = { Text("حذف حزمة الصوت؟", color = Gold) },
+                    text = {
+                        Text(
+                            "سيتم حذف ملفات حزمة ${pendingVoicePackDelete?.name} والتنزيلات الجزئية الخاصة بها فقط. لن تُحذف تسجيلاتك المحفوظة.",
+                            color = TextMain
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            val pack = pendingVoicePackDelete ?: return@TextButton
+                            pendingVoicePackDelete = null
+                            scope.launch {
+                                try {
+                                    ensureNabraEngine().removePack(pack.id)
+                                    voicePackPrefs.edit { remove("installed_${pack.id}") }
+                                    installedPackIds = installedPackIds - pack.id
+                                    if (selectedVoice.engineId == "nabra" && selectedVoice.catalogId == pack.id) {
+                                        selectedVoice = maleVoices.first()
+                                    }
+                                    managerStatus = "تم حذف ملفات الحزمة. بقيت التسجيلات كما هي."
+                                    refreshVoiceStorage()
+                                } catch (error: Exception) {
+                                    managerStatus = error.message ?: "تعذر حذف حزمة الصوت."
+                                }
+                            }
+                        }) { Text("حذف", color = Color(0xFFE1A7A7)) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { pendingVoicePackDelete = null }) { Text("إلغاء", color = Gold) }
+                    }
+                )
+            }
+
+            if (showPerformanceDialog) {
+                AlertDialog(
+                    onDismissRequest = { if (!performanceRunning) showPerformanceDialog = false },
+                    containerColor = SurfaceDark,
+                    title = { Text("اختبار أداء SAWT", color = Gold, fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column(
+                            modifier = Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("اختبار محلي على هذا الهاتف باستخدام نص عربي ثابت. لا يستخدم الإنترنت ولا يضيف ملفات إلى مكتبة التسجيلات.", color = TextMain, fontSize = 11.sp, lineHeight = 17.sp)
+                            Button(
+                                onClick = { startPerformanceBenchmark() },
+                                enabled = modelReady && !performanceRunning && !modelLoading && !generating && !previewing,
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = Background)
+                            ) { Text(if (performanceRunning) "جارٍ الاختبار…" else "بدء اختبار الأداء") }
+                            if (performanceRunning) {
+                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Gold, trackColor = SurfaceRaised)
+                            }
+                            Text(performanceStage, color = GoldSoft, fontSize = 10.sp)
+                            performanceError?.let { Text(it, color = Color(0xFFE1A7A7), fontSize = 11.sp) }
+                            performanceReport?.let { report ->
+                                Divider(color = Border)
+                                Text("زمن أول تحويل (يشمل تهيئة المحرك)", color = Gold, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                BenchmarkResultLine("6 خطوات", report.coldFirstConversion)
+                                Text("زمن التحويل بعد التهيئة", color = Gold, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                BenchmarkResultLine("6 خطوات", report.warmConversion)
+                                Text("مقارنة إعدادات الجودة", color = Gold, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                BenchmarkResultLine("سريع · 4 خطوات", report.qualityComparisons[0])
+                                BenchmarkResultLine("متوازن · 6 خطوات", report.qualityComparisons[1])
+                                BenchmarkResultLine("أعلى جودة · 8 خطوات", report.qualityComparisons[2])
+                                Text(
+                                    "الخطوات الفعلية قد تُخفض تلقائيًا لحماية الذاكرة. الاختبار يقيس الزمن والذاكرة، ولا يحكم آليًا على جمال النطق؛ استمع للعينات لمقارنة الجودة.",
+                                    color = TextMuted,
+                                    fontSize = 10.sp,
+                                    lineHeight = 15.sp
+                                )
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { showPerformanceDialog = false }, enabled = !performanceRunning) {
+                            Text("إغلاق", color = Gold)
+                        }
+                    }
+                )
+            }
+
             if (showHelp) {
                 AlertDialog(
                     onDismissRequest = { showHelp = false },
@@ -1309,7 +1650,7 @@ private fun SawtStudio() {
                     onDismissRequest = { showDeleteConfirmation = false },
                     containerColor = SurfaceDark,
                     title = { Text("حذف حزمة الأصوات؟", color = Gold) },
-                    text = { Text("سيتم حذف ملفات النماذج من الهاتف. ستحتاج إلى الإنترنت لتنزيلها مرة أخرى قبل استخدام التحويل المحلي.", color = TextMain) },
+                    text = { Text("سيتم حذف ملفات Supertonic والتنزيلات الجزئية فقط. ستحتاج إلى الإنترنت لتنزيلها مجددًا. لن تُحذف مكتبة التسجيلات المحفوظة.", color = TextMain) },
                     confirmButton = {
                         TextButton(onClick = {
                             if (controlsLocked || saving) {
@@ -1321,7 +1662,8 @@ private fun SawtStudio() {
                                 modelReady = false
                                 lastFile = null
                                 showDeleteConfirmation = false
-                                status = "تم حذف حزمة الأصوات من الهاتف."
+                                status = "تم حذف حزمة Supertonic والتنزيلات الجزئية. التسجيلات لم تتأثر."
+                                scope.launch { refreshVoiceStorage() }
                             } catch (error: Exception) {
                                 errorMessage = error.message ?: "تعذر حذف حزمة الأصوات."
                             }
