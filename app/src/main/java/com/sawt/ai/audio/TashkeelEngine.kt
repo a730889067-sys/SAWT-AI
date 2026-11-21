@@ -1,12 +1,14 @@
 package com.sawt.ai.audio
 
 import android.content.Context
+import android.annotation.SuppressLint
 import android.os.Handler
 import android.os.Looper
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebView
 import android.view.ViewGroup
 import androidx.webkit.WebViewAssetLoader
@@ -28,6 +30,9 @@ import kotlin.coroutines.resumeWithException
  * Ichkil's 22 MB ONNX model is cached by WebView after the first online use.
  * All subsequent inference runs locally with no text sent to a server.
  */
+// JavaScript is required for the bundled ONNX/WebAssembly worker. The WebView
+// loads appassets only, blocks external page navigation, and disables file access.
+@SuppressLint("SetJavaScriptEnabled")
 class TashkeelEngine(
     context: Context,
     private val onStatus: (String) -> Unit = {}
@@ -38,6 +43,7 @@ class TashkeelEngine(
     private val nextRequestId = AtomicInteger(1)
     private val pending = ConcurrentHashMap<Int, CancellableContinuation<String>>()
     @Volatile private var closed = false
+    @Volatile private var renderProcessGone = false
     @Volatile private var pageUsable = false
     @Volatile private var pendingModelRelease: CompletableDeferred<Unit>? = null
     @Volatile private var lastProgressPercent = -1
@@ -69,6 +75,38 @@ class TashkeelEngine(
                 request: WebResourceRequest
             ): WebResourceResponse? = assetLoader.shouldInterceptRequest(request.url)
 
+            override fun shouldOverrideUrlLoading(
+                view: WebView,
+                request: WebResourceRequest
+            ): Boolean =
+                request.url.scheme != "https" ||
+                    request.url.host != "appassets.androidplatform.net"
+
+            override fun onRenderProcessGone(
+                view: WebView,
+                detail: RenderProcessGoneDetail
+            ): Boolean {
+                renderProcessGone = true
+                pageUsable = false
+                val error = IOException(
+                    if (detail.didCrash()) {
+                        "تعطل محرّك عرض التشكيل؛ أوقف التطبيق الصفحة بأمان ويمكنك متابعة العمل دون تشكيل تلقائي."
+                    } else {
+                        "أُغلق محرّك عرض التشكيل؛ أوقف التطبيق الصفحة بأمان."
+                    }
+                )
+                if (!pageReady.isCompleted) pageReady.completeExceptionally(error)
+                pending.entries.toList().forEach { (id, continuation) ->
+                    if (pending.remove(id, continuation) && continuation.isActive) {
+                        continuation.resumeWithException(error)
+                    }
+                }
+                pendingModelRelease?.completeExceptionally(error)
+                pendingModelRelease = null
+                reportStatus(error.message ?: "تعذر تشغيل محرّك التشكيل.")
+                return true
+            }
+
             override fun onReceivedError(
                 view: WebView,
                 request: WebResourceRequest,
@@ -85,7 +123,7 @@ class TashkeelEngine(
     }
 
     suspend fun diacritize(text: String): String {
-        if (closed) throw IOException("محرك التشكيل مغلق.")
+        if (closed || renderProcessGone) throw IOException("محرك التشكيل غير متاح بعد تعطل صفحة العرض. أعد فتح التطبيق لإعادة تشغيله.")
         if (!TashkeelTextProcessor.containsArabic(text)) return text
         withTimeout(PAGE_READY_TIMEOUT_MS) { pageReady.await() }
 
@@ -105,7 +143,7 @@ class TashkeelEngine(
      * concurrent RAM pressure. The model stays in WebView's local cache.
      */
     suspend fun releaseModelMemory() {
-        if (closed || !pageUsable) return
+        if (closed || renderProcessGone || !pageUsable) return
 
         val released = CompletableDeferred<Unit>()
         pendingModelRelease = released
@@ -219,14 +257,13 @@ class TashkeelEngine(
         pendingModelRelease?.complete(Unit)
         pendingModelRelease = null
         mainHandler.post {
-            try {
-                (webView.parent as? ViewGroup)?.removeView(webView)
-                webView.stopLoading()
-                webView.removeJavascriptInterface(BRIDGE_NAME)
-                webView.loadUrl("about:blank")
-                webView.destroy()
-            } catch (_: Exception) {
+            try { (webView.parent as? ViewGroup)?.removeView(webView) } catch (_: Exception) { }
+            try { webView.stopLoading() } catch (_: Exception) { }
+            try { webView.removeJavascriptInterface(BRIDGE_NAME) } catch (_: Exception) { }
+            if (!renderProcessGone) {
+                try { webView.loadUrl("about:blank") } catch (_: Exception) { }
             }
+            try { webView.destroy() } catch (_: Exception) { }
         }
     }
 
