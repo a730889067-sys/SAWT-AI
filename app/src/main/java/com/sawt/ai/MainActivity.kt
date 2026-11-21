@@ -128,7 +128,7 @@ private fun SawtStudio() {
         }.keys.map { it.removePrefix("installed_") }.toSet())
     }
     var nabraEngine by remember { mutableStateOf<NabraTtsEngine?>(null) }
-    var requestedNumSteps by remember { mutableIntStateOf(8) }
+    var requestedNumSteps by remember { mutableIntStateOf(6) }
     var voicePackLoadingId by remember { mutableStateOf<String?>(null) }
     var voiceCatalogRefreshing by remember { mutableStateOf(false) }
     var voiceLibraryStatus by remember { mutableStateOf("مكتبة أصوات قابلة للتحديث من GitHub.") }
