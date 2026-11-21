@@ -98,6 +98,19 @@ class TashkeelEngine(
         return result.toString()
     }
 
+    /**
+     * Releases the ONNX WebAssembly worker before audio synthesis to reduce
+     * concurrent RAM pressure. The model stays in WebView's local cache.
+     */
+    fun releaseModelMemory() {
+        if (closed) return
+        webView.post {
+            if (!closed) {
+                webView.evaluateJavascript("window.sawtTashkeel?.dispose?.();", null)
+            }
+        }
+    }
+
     private suspend fun diacritizeChunk(chunk: String): String =
         withTimeout(INFERENCE_TIMEOUT_MS) {
             suspendCancellableCoroutine { continuation ->
