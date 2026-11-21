@@ -107,6 +107,7 @@ private fun SawtStudio() {
     var inputValue by remember { mutableStateOf(TextFieldValue("")) }
     val input = inputValue.text
     var tashkeelStatus by remember { mutableStateOf("يُضاف التشكيل تلقائيًا بعد التوقف عن الكتابة قليلًا.") }
+    var tashkeelWorking by remember { mutableStateOf(false) }
     var lastAutoDiacritizedText by remember { mutableStateOf("") }
     var language by remember { mutableStateOf("ar") }
     var selectedVoice by remember { mutableStateOf(maleVoices.first()) }
@@ -210,17 +211,21 @@ private fun SawtStudio() {
         val processor = tashkeelEngine ?: return@LaunchedEffect
         val source = input
         if (language != "ar" || !TashkeelTextProcessor.containsArabic(source)) {
+            tashkeelWorking = false
             return@LaunchedEffect
         }
         val baseText = TashkeelTextProcessor.stripDiacritics(source)
         if (baseText.isBlank() || source == lastAutoDiacritizedText) {
+            tashkeelWorking = false
             return@LaunchedEffect
         }
 
-        // Debounce inference so typing and keyboard composition stay responsive.
-        delay(850L)
-        if (input != source) return@LaunchedEffect
+        // Lock only audio actions while the 850 ms debounce/inference runs.
+        // Keep the editor enabled so the user can continue typing naturally.
+        tashkeelWorking = true
         try {
+            delay(850L)
+            if (input != source) return@LaunchedEffect
             tashkeelStatus = "جارٍ إضافة الحركات تلقائيًا…"
             val diacritized = processor.diacritize(source)
             if (input == source) {
@@ -239,6 +244,8 @@ private fun SawtStudio() {
             throw cancelled
         } catch (error: Exception) {
             tashkeelStatus = "لم يكتمل التشكيل التلقائي: ${error.message ?: "تحقق من اتصال الإنترنت لأول تنزيل."}"
+        } finally {
+            tashkeelWorking = false
         }
     }
 
@@ -503,7 +510,7 @@ private fun SawtStudio() {
                                 }
                             }
                         },
-                        enabled = modelReady && engineWarmed && !modelLoading && !engineWarming && !generating && !previewing,
+                        enabled = modelReady && engineWarmed && !modelLoading && !engineWarming && !generating && !previewing && !tashkeelWorking,
                         modifier = Modifier.fillMaxWidth().height(46.dp),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Gold),
                         border = BorderStroke(1.dp, GoldSoft)
@@ -672,6 +679,11 @@ private fun SawtStudio() {
                         onClick = {
                             if (!modelReady || input.isBlank()) return@Button
                             val requestText = input.trim()
+                            // Drop the diacritizer's in-memory ONNX/WASM session before loading
+                            // native TTS so both large engines do not compete for phone RAM.
+                            if (language == "ar" && TashkeelTextProcessor.containsArabic(requestText)) {
+                                tashkeelEngine?.releaseModelMemory()
+                            }
                             val requestLanguage = language
                             val requestVoice = selectedVoice
                             val requestSpeed = speed
@@ -720,7 +732,7 @@ private fun SawtStudio() {
                                 }
                             }
                         },
-                        enabled = modelReady && engineWarmed && !modelLoading && !engineWarming && !generating && !previewing && input.isNotBlank(),
+                        enabled = modelReady && engineWarmed && !modelLoading && !engineWarming && !generating && !previewing && !tashkeelWorking && input.isNotBlank(),
                         modifier = Modifier.fillMaxWidth().height(58.dp),
                         shape = RoundedCornerShape(18.dp),
                         colors = ButtonDefaults.buttonColors(
