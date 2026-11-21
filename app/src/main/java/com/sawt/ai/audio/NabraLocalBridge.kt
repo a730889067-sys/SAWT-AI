@@ -61,6 +61,10 @@ class NabraLocalBridge(
             activeFile = file
             activeOutput = output
             return true
+        } catch (error: OutOfMemoryError) {
+            closeActive(delete = true)
+            emit(NabraBridgeEvent.Error("لم تكفِ الذاكرة لتجهيز ملف الصوت الإضافي."))
+            return false
         } catch (error: Exception) {
             emit(NabraBridgeEvent.Error("تعذر تجهيز ملف الصوت: ${error.message ?: "خطأ في التخزين"}"))
             return false
@@ -78,6 +82,10 @@ class NabraLocalBridge(
             val bytes = Base64.decode(encoded, Base64.DEFAULT)
             output.write(bytes)
             return true
+        } catch (error: OutOfMemoryError) {
+            closeActive(delete = true)
+            emit(NabraBridgeEvent.Error("نفدت الذاكرة أثناء كتابة الصوت الإضافي."))
+            return false
         } catch (error: Exception) {
             closeActive(delete = true)
             emit(NabraBridgeEvent.Error("تعذر كتابة الصوت: ${error.message ?: "خطأ غير معروف"}"))
