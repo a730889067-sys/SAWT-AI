@@ -38,6 +38,13 @@ private data class ModelAsset(
     val sha256: String
 )
 
+data class SupertonicStorageSnapshot(
+    val installedBytes: Long,
+    val pendingBytes: Long,
+    val availableBytes: Long,
+    val isInstalled: Boolean
+)
+
 class SupertonicTtsEngine(context: Context) {
     private val appContext = context.applicationContext
     private val modelsRoot = File(appContext.filesDir, "sawt-models")
@@ -206,13 +213,12 @@ class SupertonicTtsEngine(context: Context) {
                 }
 
                 File(appContext.cacheDir, "$MODEL_DIRECTORY.tar.bz2").delete()
-                File(modelsRoot, ".supertonic-installing").deleteRecursively()
-                File(modelsRoot, ".supertonic-previous").deleteRecursively()
-                File(appContext.cacheDir, "vector_estimator.mobile.tmp").delete()
-
                 val stagingRoot = File(modelsRoot, ".supertonic-installing")
                 val backupRoot = File(modelsRoot, ".supertonic-previous")
-                if (!stagingRoot.mkdirs()) {
+                if (stagingRoot.exists() && !stagingRoot.isDirectory) {
+                    throw IOException("مسار تنزيل الأصوات غير صالح.")
+                }
+                if (!stagingRoot.exists() && !stagingRoot.mkdirs()) {
                     throw IOException("تعذر تجهيز مساحة تثبيت الأصوات على الهاتف.")
                 }
 
@@ -246,10 +252,10 @@ class SupertonicTtsEngine(context: Context) {
                     modelIntegrityVerified = true
                     onStage("اكتمل تثبيت الأصوات العشرة. يمكنك الآن العمل دون إنترنت.")
                 } catch (error: OutOfMemoryError) {
-                    stagingRoot.deleteRecursively()
-                    throw IOException("لم تكفِ ذاكرة الهاتف لإكمال تثبيت الأصوات. أغلق التطبيقات الأخرى وأعد المحاولة.", error)
+                    // Keep verified files and .part downloads so the next attempt can resume.
+                    throw IOException("لم تكفِ ذاكرة الهاتف لإكمال تثبيت الأصوات. أُبقيت الملفات الجزئية لاستكمال التنزيل لاحقًا.", error)
                 } catch (error: Exception) {
-                    stagingRoot.deleteRecursively()
+                    // Do not discard partial downloads when the network drops or the app closes.
                     throw error
                 }
             }
@@ -375,6 +381,25 @@ class SupertonicTtsEngine(context: Context) {
         }
     }
 
+    fun storageSnapshot(): SupertonicStorageSnapshot {
+        fun bytes(file: File): Long {
+            if (!file.exists()) return 0L
+            if (file.isFile) return file.length()
+            return file.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        }
+        val staging = File(modelsRoot, ".supertonic-installing")
+        val optimizedPart = File(appContext.cacheDir, "vector_estimator.mobile.tmp")
+        val stat = StatFs(appContext.filesDir.absolutePath)
+        return SupertonicStorageSnapshot(
+            installedBytes = bytes(modelDirectory),
+            pendingBytes = bytes(staging) + bytes(optimizedPart),
+            availableBytes = stat.availableBytes,
+            isInstalled = isModelInstalled()
+        )
+    }
+
+    fun effectiveNumSteps(requestedSteps: Int): Int = recommendedNumSteps(requestedSteps)
+
     fun deleteDownloadedModels() {
         if (operationMutex.isLocked || activeSynthesisCount.get() > 0) {
             throw IllegalStateException("لا يمكن حذف الأصوات أثناء وجود عملية قيد التنفيذ.")
@@ -384,6 +409,7 @@ class SupertonicTtsEngine(context: Context) {
         modelsRoot.deleteRecursively()
         File(appContext.cacheDir, "$MODEL_DIRECTORY.tar.bz2").delete()
         File(appContext.cacheDir, "vector_estimator.mobile.tmp").delete()
+        // Recording history is stored separately under filesDir/audio_history and is untouched.
     }
 
     suspend fun releaseNativeModel() {
@@ -520,30 +546,50 @@ class SupertonicTtsEngine(context: Context) {
         destination: File,
         onProgress: (Long, Long) -> Unit
     ) {
-        destination.delete()
+        val offset = destination.length().takeIf { it in 1 until OPTIMIZED_VECTOR_SIZE_BYTES } ?: 0L
+        if (destination.length() >= OPTIMIZED_VECTOR_SIZE_BYTES) {
+            val completeHash = calculateSha256(destination)
+            if (completeHash.equals(OPTIMIZED_VECTOR_SHA256, ignoreCase = true)) {
+                onProgress(destination.length(), OPTIMIZED_VECTOR_SIZE_BYTES)
+                return
+            }
+            destination.delete()
+        }
         val connection = (URL(OPTIMIZED_VECTOR_URL).openConnection() as HttpURLConnection).apply {
             instanceFollowRedirects = true
             connectTimeout = 30_000
             readTimeout = 90_000
             requestMethod = "GET"
             setRequestProperty("User-Agent", "SAWT-AI-Android")
+            setRequestProperty("Accept-Encoding", "identity")
+            if (offset > 0L) setRequestProperty("Range", "bytes=$offset-")
         }
         try {
             connection.connect()
             val status = connection.responseCode
             if (status !in 200..299) throw IOException("تعذر تنزيل تحسين الصوت (HTTP $status).")
-            val total = connection.contentLengthLong.takeIf { it > 0 } ?: OPTIMIZED_VECTOR_SIZE_BYTES
-            var downloaded = 0L
-            val digest = MessageDigest.getInstance("SHA-256")
+            val append = offset > 0L && status == HttpURLConnection.HTTP_PARTIAL
+            if (offset > 0L && status == HttpURLConnection.HTTP_OK) {
+                destination.delete()
+            } else if (offset > 0L && !append) {
+                throw IOException("لم يقبل الخادم استكمال تنزيل تحسين الصوت (HTTP $status).")
+            }
+            val startBytes = if (append) offset else 0L
+            val responseLength = connection.contentLengthLong
+            val total = connection.getHeaderField("Content-Range")
+                ?.substringAfterLast("/")
+                ?.toLongOrNull()
+                ?: if (responseLength > 0L) startBytes + responseLength else OPTIMIZED_VECTOR_SIZE_BYTES
+            var downloaded = startBytes
+            onProgress(downloaded, total)
             BufferedInputStream(connection.inputStream).use { input ->
-                val fileOutput = FileOutputStream(destination)
+                val fileOutput = FileOutputStream(destination, append)
                 BufferedOutputStream(fileOutput).use { output ->
                     val buffer = ByteArray(64 * 1024)
                     while (true) {
                         val count = input.read(buffer)
                         if (count < 0) break
                         output.write(buffer, 0, count)
-                        digest.update(buffer, 0, count)
                         downloaded += count
                         onProgress(downloaded, total)
                     }
@@ -551,12 +597,15 @@ class SupertonicTtsEngine(context: Context) {
                     fileOutput.fd.sync()
                 }
             }
-            if (downloaded < MIN_OPTIMIZED_VECTOR_SIZE_BYTES) {
-                throw IOException("ملف تحسين الصوت غير مكتمل. أعد المحاولة.")
+            if (destination.length() < MIN_OPTIMIZED_VECTOR_SIZE_BYTES ||
+                (total > 0L && destination.length() != total)
+            ) {
+                throw IOException("ملف تحسين الصوت غير مكتمل؛ أُبقي الجزء الذي تم تنزيله لاستكماله لاحقًا.")
             }
-            val actualSha = digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
+            val actualSha = calculateSha256(destination)
             if (!actualSha.equals(OPTIMIZED_VECTOR_SHA256, ignoreCase = true)) {
-                throw IOException("فشل التحقق من بصمة تحسين الصوت. لم يتم استبدال النموذج.")
+                destination.delete()
+                throw IOException("فشل التحقق من بصمة تحسين الصوت. سيُعاد تنزيل الملف لحماية المحرك.")
             }
         } finally {
             connection.disconnect()
@@ -581,8 +630,19 @@ class SupertonicTtsEngine(context: Context) {
         destination: File,
         onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit
     ) {
+        if (destination.isFile && destination.length() >= asset.minimumBytes &&
+            calculateSha256(destination).equals(asset.sha256, ignoreCase = true)
+        ) {
+            onProgress(destination.length(), asset.expectedBytes.takeIf { it > 0L } ?: destination.length())
+            return
+        }
         val partFile = File(destination.parentFile, destination.name + ".part")
-        partFile.delete()
+        if (asset.expectedBytes > 0L && partFile.length() >= asset.expectedBytes &&
+            !calculateSha256(partFile).equals(asset.sha256, ignoreCase = true)
+        ) {
+            partFile.delete()
+        }
+        val offset = partFile.length()
         val connection = (URL(asset.url).openConnection() as HttpURLConnection).apply {
             instanceFollowRedirects = true
             connectTimeout = 30_000
@@ -590,6 +650,7 @@ class SupertonicTtsEngine(context: Context) {
             requestMethod = "GET"
             setRequestProperty("User-Agent", "SAWT-AI-Android")
             setRequestProperty("Accept-Encoding", "identity")
+            if (offset > 0L) setRequestProperty("Range", "bytes=$offset-")
         }
         var completed = false
         try {
@@ -598,21 +659,29 @@ class SupertonicTtsEngine(context: Context) {
             if (status !in 200..299) {
                 throw IOException("تعذر تنزيل ${asset.fileName} (HTTP $status).")
             }
-
-            val total = connection.contentLengthLong.takeIf { it > 0 }
-                ?: asset.expectedBytes.takeIf { it > 0 }
-                ?: asset.minimumBytes
-            var downloaded = 0L
-            val digest = MessageDigest.getInstance("SHA-256")
+            val append = offset > 0L && status == HttpURLConnection.HTTP_PARTIAL
+            if (offset > 0L && status == HttpURLConnection.HTTP_OK) {
+                partFile.delete()
+            } else if (offset > 0L && !append) {
+                throw IOException("لم يقبل الخادم استكمال تنزيل ${asset.fileName} (HTTP $status).")
+            }
+            val startBytes = if (append) offset else 0L
+            val responseLength = connection.contentLengthLong
+            val total = connection.getHeaderField("Content-Range")
+                ?.substringAfterLast("/")
+                ?.toLongOrNull()
+                ?: if (responseLength > 0L) startBytes + responseLength
+                else asset.expectedBytes.takeIf { it > 0L } ?: asset.minimumBytes
+            var downloaded = startBytes
+            onProgress(downloaded, total)
             BufferedInputStream(connection.inputStream).use { input ->
-                val fileOutput = FileOutputStream(partFile)
+                val fileOutput = FileOutputStream(partFile, append)
                 BufferedOutputStream(fileOutput).use { output ->
                     val buffer = ByteArray(128 * 1024)
                     while (true) {
                         val count = input.read(buffer)
                         if (count < 0) break
                         output.write(buffer, 0, count)
-                        digest.update(buffer, 0, count)
                         downloaded += count
                         onProgress(downloaded, total)
                     }
@@ -621,15 +690,17 @@ class SupertonicTtsEngine(context: Context) {
                 }
             }
 
-            if (downloaded < asset.minimumBytes) {
-                throw IOException("تنزيل ${asset.fileName} غير مكتمل. أعد المحاولة.")
+            val finalSize = partFile.length()
+            if (finalSize < asset.minimumBytes) {
+                throw IOException("تنزيل ${asset.fileName} غير مكتمل؛ أُبقي الجزء الذي تم تنزيله لاستكماله لاحقًا.")
             }
-            if (asset.expectedBytes > 0L && downloaded != asset.expectedBytes) {
-                throw IOException("حجم ${asset.fileName} لا يطابق الحجم المتوقع. أُوقف التثبيت.")
+            if (asset.expectedBytes > 0L && finalSize != asset.expectedBytes) {
+                throw IOException("حجم ${asset.fileName} غير مكتمل؛ أُبقي الملف الجزئي لاستكماله لاحقًا.")
             }
-            val actualSha = digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
+            val actualSha = calculateSha256(partFile)
             if (!actualSha.equals(asset.sha256, ignoreCase = true)) {
-                throw IOException("فشل فحص سلامة ${asset.fileName}. لم يتم تثبيت الملف.")
+                partFile.delete()
+                throw IOException("فشل فحص سلامة ${asset.fileName}. حُذف الجزء غير السليم وسيُعاد تنزيله.")
             }
 
             if (destination.exists() && !destination.delete()) {
@@ -641,7 +712,8 @@ class SupertonicTtsEngine(context: Context) {
             completed = true
         } finally {
             connection.disconnect()
-            if (!completed) partFile.delete()
+            // Leave .part in place on interruption so the next request can use HTTP Range.
+            if (completed) partFile.delete()
         }
     }
 
