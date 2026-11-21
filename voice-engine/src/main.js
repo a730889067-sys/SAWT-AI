@@ -3,91 +3,70 @@ import { NabraTTS, clearCache } from "nabra-tts";
 const native = () => window.SAWTBridge;
 let tts = null;
 let loadPromise = null;
-let diacritizer = null;
-let diacritizerReady = null;
-let nextRequestId = 1;
-const diacritizerPending = new Map();
+let loadedKey = "";
+
+const DEFAULT_PACK = {
+  repo: "oddadmix/Nabra-7M-Distill-ONNX",
+  revision: "bbac0f1e6b001bfae89871be366a4b000180deb2",
+  dtype: "fp16",
+  device: "wasm"
+};
 
 function notifyError(error) {
-  const message = String(error?.message ?? error ?? "حدث خطأ غير متوقع في محرك الصوت.");
+  const message = String(error?.message ?? error ?? "تعذر تشغيل محرك Nabra.");
   native()?.onEngineError(message);
 }
 function notifyProgress(name, loaded, total) {
   native()?.onEngineProgress(name, Number(loaded) || 0, Number(total) || 0);
 }
-
-function ensureDiacritizer() {
-  if (diacritizerReady) return diacritizerReady;
-  diacritizerReady = new Promise((resolve, reject) => {
-    try {
-      diacritizer = new Worker(new URL("./ichkil.worker.js", import.meta.url), {
-        type: "module",
-        name: "sawt-ichkil-diacritizer"
-      });
-      diacritizer.onmessage = event => {
-        const message = event.data || {};
-        if (message.type === "progress") {
-          notifyProgress(message.name, message.loaded, message.total);
-          return;
-        }
-        if (message.type === "ready") {
-          resolve(true);
-          return;
-        }
-        if (message.id !== undefined) {
-          const pending = diacritizerPending.get(message.id);
-          if (!pending) return;
-          diacritizerPending.delete(message.id);
-          if (message.type === "result") pending.resolve(message.text);
-          else if (message.type === "error") pending.reject(new Error(message.message));
-        } else if (message.type === "error") {
-          reject(new Error(message.message));
-        }
-      };
-      diacritizer.onerror = event => reject(new Error(event.message || "تعطل محرك التشكيل."));
-      diacritizer.postMessage({ type: "load" });
-    } catch (error) {
-      reject(error);
-    }
-  });
-  return diacritizerReady;
+function normalizedOptions(options = {}) {
+  const repo = String(options.repo || DEFAULT_PACK.repo);
+  const revision = String(options.revision || DEFAULT_PACK.revision);
+  const dtype = options.dtype === "fp32" ? "fp32" : "fp16";
+  // The native catalog validates model host/repository/revision before it reaches
+  // this page. The JS bridge accepts only pinned Nabra-family repository values.
+  if (repo !== DEFAULT_PACK.repo || !/^[a-f0-9]{40}$/i.test(revision)) {
+    throw new Error("حزمة الصوت غير معتمدة أو أن إصدارها غير مثبت.");
+  }
+  return { repo, revision, dtype, device: "wasm" };
+}
+function packKey(options) {
+  return [options.repo, options.revision, options.dtype].join("@");
 }
 
-async function diacritizeArabic(text) {
-  await ensureDiacritizer();
-  const id = nextRequestId++;
-  return new Promise((resolve, reject) => {
-    diacritizerPending.set(id, { resolve, reject });
-    diacritizer.postMessage({ type: "diacritize", id, text });
-  });
-}
-
-async function load() {
-  if (tts) return tts;
-  if (loadPromise) return loadPromise;
+async function load(options = {}) {
+  const safe = normalizedOptions(options);
+  const key = packKey(safe);
+  if (tts && loadedKey === key) return tts;
+  if (loadPromise && loadedKey === key) return loadPromise;
+  if (tts) {
+    try { await tts.dispose(); } catch {}
+    tts = null;
+    loadedKey = "";
+  }
   loadPromise = (async () => {
-    const model = await NabraTTS.load({
-      repo: "oddadmix/Nabra-7M-Distill-ONNX",
-      revision: "bbac0f1e6b001bfae89871be366a4b000180deb2",
-      dtype: "fp16",
-      device: "wasm",
+    // Keep ONNX Runtime WASM beside the APK's local WebView assets. It must not
+    // fall back to a CDN when the device is offline.
+    const engine = await NabraTTS.load({
+      ...safe,
       worker: true,
       cache: true,
       numThreads: 1,
       wasmPaths: new URL("./wasm/", window.location.href).href,
       normalize: false,
-      diacritize: diacritizeArabic,
-      onProgress: progress => notifyProgress(progress.file, progress.loaded, progress.total)
+      onProgress: p => notifyProgress(p.file, p.loaded, p.total)
     });
-    await ensureDiacritizer();
-    tts = model;
-    native()?.onEngineReady("wasm");
-    return model;
+    tts = engine;
+    loadedKey = key;
+    native()?.onEngineReady(engine.device);
+    return engine;
   })();
   try {
     return await loadPromise;
   } catch (error) {
     loadPromise = null;
+    tts = null;
+    loadedKey = "";
     notifyError(error);
     throw error;
   }
@@ -116,23 +95,28 @@ function sendPcm(bytes) {
   const chunkSize = 48 * 1024;
   for (let offset = 0; offset < bytes.length; offset += chunkSize) {
     if (!bridge.appendAudioChunk(base64(bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length))))) {
-      throw new Error("تعذرت كتابة جزء من ملف الصوت.");
+      throw new Error("تعذرت كتابة جزء من التسجيل.");
     }
   }
 }
 
-async function generate(text, speed = 1) {
+async function generate(text, speed = 1, options = {}) {
   if (typeof text !== "string" || !text.trim()) throw new Error("اكتب نصًا أولًا.");
   if (new TextEncoder().encode(text).length > 5000) {
     throw new Error("النص أطول من الحد المسموح به (5000 بايت).");
   }
   try {
-    const engine = await load();
+    const engine = await load(options);
     if (!native()?.beginAudio(24000)) throw new Error("تعذر إنشاء ملف الصوت المحلي.");
+    let chunksCount = 0;
     for await (const chunk of engine.stream(text, { speed: Math.max(0.8, Math.min(1.2, speed)) })) {
-      sendPcm(floatToPcm16(chunk.audio));
+      if (chunk.audio?.length) {
+        sendPcm(floatToPcm16(chunk.audio));
+        chunksCount++;
+      }
     }
-    if (!native()?.finishAudio()) throw new Error("تعذر إكمال ملف الصوت المحلي.");
+    if (!chunksCount) throw new Error("لم ينتج محرك الصوت أي مقاطع صالحة.");
+    if (!native()?.finishAudio()) throw new Error("تعذر إكمال ملف WAV.");
   } catch (error) {
     native()?.cancelAudio();
     notifyError(error);
@@ -144,20 +128,15 @@ async function removeDownloadedModels() {
   try { await tts?.dispose(); } catch {}
   tts = null;
   loadPromise = null;
-  try { diacritizer?.postMessage({ type: "dispose" }); } catch {}
-  diacritizer?.terminate();
-  diacritizer = null;
-  diacritizerReady = null;
-  diacritizerPending.clear();
+  loadedKey = "";
   await clearCache();
-  await caches.delete("sawt-ai-ichkil-v030");
   native()?.onModelsRemoved();
 }
 
 window.sawtTts = {
-  load: () => load().catch(() => null),
-  generate: (text, speed = 1) => generate(text, speed),
+  load: options => load(options).catch(() => null),
+  generate,
   removeDownloadedModels
 };
 
-window.SAWTBridge?.onEnginePageReady();
+native()?.onEnginePageReady();
