@@ -8,6 +8,7 @@ import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
+import android.view.ViewGroup
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewClientCompat
 import kotlinx.coroutines.CancellableContinuation
@@ -180,6 +181,7 @@ class TashkeelEngine(
         pending.clear()
         mainHandler.post {
             try {
+                (webView.parent as? ViewGroup)?.removeView(webView)
                 webView.stopLoading()
                 webView.removeJavascriptInterface(BRIDGE_NAME)
                 webView.loadUrl("about:blank")
