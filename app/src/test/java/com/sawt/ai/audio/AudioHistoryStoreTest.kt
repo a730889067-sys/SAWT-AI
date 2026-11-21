@@ -31,7 +31,7 @@ class AudioHistoryStoreTest {
         assertEquals(entry.id, loaded.id)
         assertEquals(text, loaded.text)
         assertEquals("M1", loaded.voiceName)
-        assertTrue(store.audioFile(entry)?.length() ?: 0L >= 44L)
+        assertTrue((store.audioFile(entry)?.length() ?: 0L) >= 44L)
     }
 
     @Test fun deletesEntryAndAudioFile() {
@@ -64,12 +64,12 @@ class AudioHistoryStoreTest {
             out.writeBytes("WAVE")
             out.writeBytes("fmt ")
             out.writeInt(Integer.reverseBytes(16))
-            out.writeShort(Short.reverseBytes(1))
+            out.writeShort(Short.reverseBytes(1.toShort()).toInt())
             out.writeShort(Short.reverseBytes(1))
             out.writeInt(Integer.reverseBytes(24_000))
             out.writeInt(Integer.reverseBytes(48_000))
-            out.writeShort(Short.reverseBytes(2))
-            out.writeShort(Short.reverseBytes(16))
+            out.writeShort(Short.reverseBytes(2.toShort()).toInt())
+            out.writeShort(Short.reverseBytes(16.toShort()).toInt())
             out.writeBytes("data")
             out.writeInt(Integer.reverseBytes(256))
             out.write(ByteArray(256))
