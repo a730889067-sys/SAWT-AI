@@ -263,6 +263,7 @@ class SupertonicTtsEngine(context: Context) {
         language: String,
         speakerId: Int,
         speed: Float,
+        requestedNumSteps: Int = 8,
         onStage: (String) -> Unit = {},
         onProgress: (completedCharacters: Int, totalCharacters: Int) -> Unit = { _, _ -> }
     ): File {
@@ -301,8 +302,8 @@ class SupertonicTtsEngine(context: Context) {
                 val config = GenerationConfig(
                     sid = speakerId,
                     speed = speed.coerceIn(0.8f, 1.2f),
-                    // Two denoising steps prioritize generation speed over maximum fidelity.
-                    numSteps = 2,
+                    // Honour the requested quality while adapting safely to available RAM.
+                    numSteps = recommendedNumSteps(requestedNumSteps),
                     extra = mapOf("lang" to language)
                 )
                 val chunks = mutableListOf<String>()
@@ -429,6 +430,20 @@ class SupertonicTtsEngine(context: Context) {
             totalMemoryBytes = memoryInfo.totalMem,
             availableMemoryBytes = memoryInfo.availMem,
             lowRamDevice = activityManager.isLowRamDevice
+        )
+    }
+
+
+    private fun recommendedNumSteps(requestedSteps: Int): Int {
+        val activityManager =
+            appContext.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        val memoryInfo = ActivityManager.MemoryInfo()
+        activityManager?.getMemoryInfo(memoryInfo)
+        return DeviceTuning.recommendedNumSteps(
+            totalMemoryBytes = memoryInfo.totalMem,
+            availableMemoryBytes = memoryInfo.availMem,
+            lowRamDevice = activityManager?.isLowRamDevice == true,
+            requestedSteps = requestedSteps
         )
     }
 
