@@ -10,7 +10,7 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.view.ViewGroup
 import androidx.webkit.WebViewAssetLoader
-import androidx.webkit.WebViewClientCompat
+import android.webkit.WebViewClient
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -61,7 +61,7 @@ class TashkeelEngine(
         webView.isVerticalScrollBarEnabled = false
         webView.isHorizontalScrollBarEnabled = false
         webView.addJavascriptInterface(JsBridge(), BRIDGE_NAME)
-        webView.webViewClient = object : WebViewClientCompat() {
+        webView.webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(
                 view: WebView,
                 request: WebResourceRequest
