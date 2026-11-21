@@ -949,25 +949,33 @@ private fun SawtStudio() {
                                     val smoothRate = if (oldRate > 0f) oldRate * 0.7f + sampleRate * 0.3f else sampleRate
                                     metricsPrefs.edit { putFloat(prefKey, smoothRate) }
 
-                                    val saved = withContext(Dispatchers.IO) {
-                                        val entry = historyStore.add(
-                                            source = result,
-                                            language = requestLanguage,
-                                            voiceName = requestVoice.name,
-                                            engineId = requestVoice.engineId,
-                                            speed = requestSpeed,
-                                            qualitySteps = if (requestVoice.engineId == "nabra") 0 else requestSteps,
-                                            text = requestText
-                                        )
-                                        Triple(entry, historyStore.audioFile(entry), historyStore.list())
+                                    val saved = runCatching {
+                                        withContext(Dispatchers.IO) {
+                                            val entry = historyStore.add(
+                                                source = result,
+                                                language = requestLanguage,
+                                                voiceName = requestVoice.name,
+                                                engineId = requestVoice.engineId,
+                                                speed = requestSpeed,
+                                                qualitySteps = if (requestVoice.engineId == "nabra") 0 else requestSteps,
+                                                text = requestText
+                                            )
+                                            Triple(entry, historyStore.audioFile(entry), historyStore.list())
+                                        }
+                                    }.getOrNull()
+                                    if (saved != null) {
+                                        historyEntries = saved.third
+                                        lastFile = saved.second ?: result
+                                        status = "اكتمل التسجيل، وحُفظ في مكتبتك الصوتية."
+                                    } else {
+                                        // A full storage device must not discard a successfully generated recording.
+                                        lastFile = result
+                                        errorMessage = "تم إنشاء التسجيل، لكن تعذر حفظ نسخة دائمة في المكتبة. نزّله الآن قبل إغلاق التطبيق."
+                                        status = "التسجيل جاهز؛ لم تتوفر مساحة كافية لحفظه في السجل."
                                     }
-                                    historyEntries = saved.third
-                                    val durableFile = saved.second ?: result
-                                    lastFile = durableFile
                                     lastVoiceName = requestVoice.name
                                     lastLanguageName = if (requestLanguage == "ar") "العربية" else "English"
-                                    SpeechPlaybackService.playFile(context, durableFile.absolutePath)
-                                    status = "اكتمل التسجيل، وحُفظ في مكتبتك الصوتية."
+                                    SpeechPlaybackService.playFile(context, (lastFile ?: result).absolutePath)
                                 } catch (cancelled: CancellationException) {
                                     throw cancelled
                                 } catch (error: Exception) {
