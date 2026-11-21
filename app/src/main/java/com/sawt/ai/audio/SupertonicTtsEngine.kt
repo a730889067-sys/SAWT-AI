@@ -537,7 +537,7 @@ class SupertonicTtsEngine(context: Context) {
             File(modelDirectory, ".sawt-verified").writeText(OPTIMIZED_INSTALL_MARKER)
             modelIntegrityVerified = false
         } catch (error: Exception) {
-            optimizedVector.delete()
+            // Preserve a partial optimized estimator so the next attempt can resume it.
             throw error
         }
     }
