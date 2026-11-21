@@ -7,6 +7,7 @@ import android.util.Base64
 import android.webkit.JavascriptInterface
 import java.io.File
 import java.io.RandomAccessFile
+import java.util.UUID
 
 sealed class NabraBridgeEvent {
     data object PageReady : NabraBridgeEvent()
@@ -15,6 +16,7 @@ sealed class NabraBridgeEvent {
     data class AudioReady(val file: File) : NabraBridgeEvent()
     data class Error(val message: String) : NabraBridgeEvent()
     data object ModelsRemoved : NabraBridgeEvent()
+    data object RuntimeReleased : NabraBridgeEvent()
 }
 
 class NabraLocalBridge(
@@ -136,6 +138,11 @@ class NabraLocalBridge(
     @JavascriptInterface
     fun onModelsRemoved() {
         emit(NabraBridgeEvent.ModelsRemoved)
+    }
+
+    @JavascriptInterface
+    fun onEngineReleased() {
+        emit(NabraBridgeEvent.RuntimeReleased)
     }
 
     @JavascriptInterface
