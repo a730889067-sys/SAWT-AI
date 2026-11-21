@@ -20,12 +20,17 @@ data class AudioHistoryEntry(
     val text: String
 )
 
-class AudioHistoryStore(private val root: File, private val maxEntries: Int = 100) {
+class AudioHistoryStore(
+    private val root: File,
+    private val maxEntries: Int = 100,
+    private val maxTotalBytes: Long = DEFAULT_MAX_TOTAL_BYTES
+) {
     private val indexFile = File(root, "history.tsv")
     private val lock = Any()
 
     init {
         require(maxEntries > 0) { "maxEntries must be positive" }
+        require(maxTotalBytes >= WAV_HEADER_BYTES) { "maxTotalBytes is too small" }
     }
 
     fun list(): List<AudioHistoryEntry> = synchronized(lock) {
@@ -84,6 +89,10 @@ class AudioHistoryStore(private val root: File, private val maxEntries: Int = 10
             throw IOException("تعذر حفظ التسجيل.", error)
         }
 
+        if (destination.length() > maxTotalBytes) {
+            destination.delete()
+            throw IOException("التسجيل أكبر من المساحة المخصصة لمكتبة التسجيلات؛ نزّله مباشرة.")
+        }
         val entry = AudioHistoryEntry(
             id = id,
             createdAtMillis = createdAtMillis,
@@ -94,17 +103,27 @@ class AudioHistoryStore(private val root: File, private val maxEntries: Int = 10
             qualitySteps = qualitySteps,
             text = text
         )
-        val all = readEntries().filter { it.id != id }.toMutableList()
-        all.add(entry)
-        all.sortByDescending { it.createdAtMillis }
-        val keep = all.take(maxEntries)
+        val all = readEntries().filter { it.id != id }.sortedByDescending { it.createdAtMillis }
+        val keep = ArrayList<AudioHistoryEntry>()
+        var retainedBytes = destination.length()
+        keep.add(entry)
+        for (old in all) {
+            if (keep.size >= maxEntries) break
+            val oldFile = File(root, "${old.id}.wav")
+            val oldSize = oldFile.length()
+            if (oldSize > 0L && retainedBytes <= maxTotalBytes - oldSize) {
+                keep.add(old)
+                retainedBytes += oldSize
+            }
+        }
         try {
             writeEntries(keep)
         } catch (error: Exception) {
             destination.delete()
             throw IOException("تعذر تحديث فهرس مكتبة التسجيلات.", error)
         }
-        all.drop(maxEntries).forEach { old ->
+        val retainedIds = keep.mapTo(HashSet()) { it.id }
+        all.filterNot { it.id in retainedIds }.forEach { old ->
             if (isSafeId(old.id)) File(root, "${old.id}.wav").delete()
         }
         entry
@@ -216,6 +235,7 @@ class AudioHistoryStore(private val root: File, private val maxEntries: Int = 10
         private const val MAX_TEXT_CHARS = 2_000
         private const val MAX_TEXT_BYTES = 5_000
         private const val MAX_VOICE_NAME_CHARS = 64
+        private const val DEFAULT_MAX_TOTAL_BYTES = 1024L * 1024L * 1024L
         private const val FIELD_COUNT = 8
     }
 }
