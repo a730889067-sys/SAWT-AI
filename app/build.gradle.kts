@@ -12,8 +12,8 @@ android {
   applicationId = "com.sawt.ai"
   minSdk = 26
   targetSdk = 36
-  versionCode = 30
-  versionName = "1.5.22"
+  versionCode = 31
+  versionName = "1.6.0"
   ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
  }
  compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
