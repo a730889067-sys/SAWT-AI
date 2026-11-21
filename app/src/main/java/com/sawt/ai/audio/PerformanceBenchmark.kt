@@ -73,6 +73,7 @@ class PerformanceBenchmark(
         onStage: (String) -> Unit,
         label: String
     ): BenchmarkMeasurement {
+        val effectiveSteps = engine.effectiveNumSteps(requestedSteps)
         val before = memorySnapshot()
         val start = SystemClock.elapsedRealtime()
         var output: File? = null
@@ -90,7 +91,7 @@ class PerformanceBenchmark(
             val after = memorySnapshot()
             return BenchmarkMeasurement(
                 requestedSteps = requestedSteps,
-                effectiveSteps = engine.effectiveNumSteps(requestedSteps),
+                effectiveSteps = effectiveSteps,
                 elapsedMillis = elapsed,
                 memoryBefore = before,
                 memoryAfter = after,
