@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-11-21",
+  "voices": [
+    {
+      "id": "nabra-msa-7m-v1",
+      "name": "Nabra · العربية الفصحى",
+      "description": "صوت عربي نسائي واحد مخصص للفصحى الحديثة. خيار تجريبي يحتاج الاستماع والقياس على هاتفك قبل اعتماده للصوت النهائي.",
+      "engine": "nabra",
+      "repository": "oddadmix/Nabra-7M-Distill-ONNX",
+      "revision": "bbac0f1e6b001bfae89871be366a4b000180deb2",
+      "dtype": "fp16",
+      "priceType": "free",
+      "priceLabel": "مجاني",
+      "license": "Apache-2.0 للنموذج والمكتبة؛ eSpeak NG المضمّن GPL-3.0-or-later",
+      "sourceUrl": "https://huggingface.co/oddadmix/Nabra-7M-Distill-ONNX",
+      "sizeLabel": "نحو 16.5 MB للنموذج والصوت",
+      "languages": ["ar"],
+      "downloadable": true
+    }
+  ]
+}
