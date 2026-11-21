@@ -513,6 +513,128 @@ private fun SawtStudio() {
                             }
                         }
                     }
+                    Spacer(Modifier.height(17.dp))
+                    Text("٤. مكتبة الأصوات", color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("حزم إضافية من مصادر موثوقة", color = TextMuted, fontSize = 10.sp, modifier = Modifier.weight(1f))
+                        TextButton(
+                            onClick = {
+                                if (voiceCatalogRefreshing) return@TextButton
+                                voiceCatalogRefreshing = true
+                                scope.launch {
+                                    try {
+                                        voicePacks = withContext(Dispatchers.IO) { voiceCatalogRepository.refresh() }
+                                        voiceLibraryStatus = "تم تحديث فهرس GitHub."
+                                    } catch (error: Exception) {
+                                        voiceLibraryStatus = error.message ?: "تعذر تحديث المكتبة. تبقى الحزم المحفوظة متاحة."
+                                    } finally {
+                                        voiceCatalogRefreshing = false
+                                    }
+                                }
+                            },
+                            enabled = !controlsLocked
+                        ) {
+                            Text(if (voiceCatalogRefreshing) "يُحدّث…" else "تحديث", color = GoldSoft, fontSize = 11.sp)
+                        }
+                    }
+                    voicePacks.forEach { pack ->
+                        val isInstalled = pack.id in installedPackIds
+                        val isSelected = selectedVoice.engineId == "nabra" && selectedVoice.catalogId == pack.id
+                        Surface(
+                            color = if (isSelected) Color(0xFF20384A) else SurfaceDark,
+                            shape = RoundedCornerShape(17.dp),
+                            border = BorderStroke(if (isSelected) 1.5.dp else 1.dp, if (isSelected) Gold else Border),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                        ) {
+                            Column(Modifier.padding(13.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(pack.name, color = TextMain, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                                    Text(pack.priceLabel, color = Gold, fontSize = 10.sp)
+                                }
+                                Spacer(Modifier.height(4.dp))
+                                Text(pack.description, color = TextMuted, fontSize = 10.sp, lineHeight = 17.sp)
+                                Spacer(Modifier.height(5.dp))
+                                Text("${pack.sizeLabel} · ${pack.license}", color = GoldSoft, fontSize = 9.sp, lineHeight = 15.sp)
+                                Spacer(Modifier.height(8.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        if (isInstalled) "موجودة على الجهاز" else if (pack.priceType == "free") "حزمة مجانية" else "ترخيص مدفوع",
+                                        color = if (isInstalled) Gold else TextMuted,
+                                        fontSize = 9.sp,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    if (pack.downloadable) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                if (voicePackLoadingId != null) return@OutlinedButton
+                                                voicePackLoadingId = pack.id
+                                                voiceLibraryStatus = "جارٍ تنزيل وتجهيز ${pack.name}…"
+                                                scope.launch {
+                                                    try {
+                                                        ensureNabraEngine().prepare(pack) { name, loaded, total ->
+                                                            val progressText = if (total > 0L) {
+                                                                "$name · ${(loaded * 100L / total).toInt().coerceIn(0, 100)}%"
+                                                            } else {
+                                                                "$name · ${loaded / (1024 * 1024)} MB"
+                                                            }
+                                                            mainHandler.post { voiceLibraryStatus = progressText }
+                                                        }
+                                                        voicePackPrefs.edit { putBoolean("installed_${pack.id}", true) }
+                                                        installedPackIds = installedPackIds + pack.id
+                                                        selectedVoice = VoiceStyle(pack.name, -1, "فصحى · تجريبي", "nabra", pack.id)
+                                                        language = "ar"
+                                                        status = "تم تجهيز ${pack.name}. استمع إلى عينة قبل استخدامه للنصوص المهمة."
+                                                        voiceLibraryStatus = "اكتمل تجهيز ${pack.name}."
+                                                    } catch (cancelled: CancellationException) {
+                                                        throw cancelled
+                                                    } catch (error: Exception) {
+                                                        voiceLibraryStatus = error.message ?: "تعذر تنزيل أو تجهيز حزمة الصوت."
+                                                        errorMessage = voiceLibraryStatus
+                                                    } finally {
+                                                        voicePackLoadingId = null
+                                                    }
+                                                }
+                                            },
+                                            enabled = voicePackLoadingId == null && !generating && !previewing && !modelLoading,
+                                            modifier = Modifier.height(38.dp),
+                                            contentPadding = PaddingValues(horizontal = 13.dp, vertical = 0.dp)
+                                        ) {
+                                            Text(
+                                                when {
+                                                    voicePackLoadingId == pack.id -> "جارٍ التجهيز…"
+                                                    isSelected -> "محدد"
+                                                    isInstalled -> "اختيار الصوت"
+                                                    else -> "تنزيل وتجربة"
+                                                },
+                                                color = Gold,
+                                                fontSize = 10.sp
+                                            )
+                                        }
+                                    } else {
+                                        OutlinedButton(
+                                            onClick = {
+                                                runCatching {
+                                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(pack.sourceUrl)))
+                                                }.onFailure {
+                                                    voiceLibraryStatus = "تعذر فتح مصدر الصوت."
+                                                }
+                                            },
+                                            modifier = Modifier.height(38.dp),
+                                            contentPadding = PaddingValues(horizontal = 13.dp, vertical = 0.dp)
+                                        ) {
+                                            Text("المصدر والترخيص", color = Gold, fontSize = 10.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Text(voiceLibraryStatus, color = TextMuted, fontSize = 10.sp, modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp))
+                    if (selectedVoice.engineId == "nabra") {
+                        Text("حزمة Nabra الحالية صوت واحد للفصحى الحديثة، وليست مجموعة أصوات رجالية ونسائية.", color = GoldSoft, fontSize = 10.sp, lineHeight = 16.sp)
+                    }
+
                     Spacer(Modifier.height(9.dp))
                     OutlinedButton(
                         onClick = {
