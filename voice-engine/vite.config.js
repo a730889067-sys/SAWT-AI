@@ -7,6 +7,12 @@ export default defineConfig({
     outDir: "../app/src/main/assets/voice_engine",
     emptyOutDir: true,
     target: "es2022",
-    assetsInlineLimit: 0
+    assetsInlineLimit: 0,
+    rollupOptions: {
+      input: {
+        index: new URL("./index.html", import.meta.url).pathname,
+        tashkeel: new URL("./tashkeel.html", import.meta.url).pathname
+      }
+    }
   }
 });
