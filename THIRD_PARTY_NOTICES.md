@@ -24,13 +24,23 @@
 - يجب مراجعة النسخة الكاملة من الترخيص عند المصدر الرسمي: https://huggingface.co/Supertone/supertonic-3/blob/main/LICENSE
 - قد تختلف شروط إعادة توزيع النموذج عن شروط إعادة توزيع كود المحرك. لا تخلط بين Apache-2.0 للمحرك وOpenRAIL-M للأوزان.
 
-## مكونات المصدر غير المضمنة في APK
+## مكونات المصدر المضمنة أو الاختيارية داخل APK
 
-يحتفظ المستودع ببعض ملفات Nabra وCloud Voice لأغراض البحث أو التطوير، لكنها ليست مسار توليد الصوت داخل تطبيق Android. يبني مسار Android صفحة Ichkil الخاصة بالتشكيل فقط؛ ولا يضمّن Nabra TTS Web أو خدمة Google Cloud الاختيارية ضمن مسار التحويل المحلي. إذا أُعيد تفعيل أي مكوّن آخر في APK، فيجب تحديث هذا الملف ومراجعة ترخيصه وشروط الخدمة قبل التوزيع.
+- يضم APK صفحة Ichkil المحلية للتشكيل، كما يضم مصدر Nabra-7M-Distill/محركه وeSpeak NG العربي ضمن ملفات WebView المجمّعة.
+- تُنزّل أوزان Nabra (ONNX FP16) وحزمة الصوت من مستودع Hugging Face عند اختيار الحزمة أول مرة، ثم تُخزّن في ذاكرة WebView المحلية. شيفرة المحرك وملفات WebAssembly التشغيلية مضمّنة داخل APK.
+- لا يضمّن مسار Android خدمة Google Cloud أو مفاتيح API.
+- يحوي `voice-engine/vendor/nabra-tts/` نسخة المصدر المثبتة على commit `16b5281ce61993df3526740990cf845a3f3036f4` مع ملفات الترخيص وإشعارات المكونات الخارجية.
+
+## Nabra-7M-Distill والصوت الفصيح الإضافي
+
+- المصدر: https://huggingface.co/oddadmix/Nabra-7M-Distill-ONNX، النموذج العربي MSA واحد ويعمل عبر ONNX Runtime Web.
+- كود Nabra-tts المضمن من https://github.com/Oddadmix/nabra-tts، مثبت على commit `16b5281ce61993df3526740990cf845a3f3036f4`، برخصة Apache-2.0.
+- يتضمن eSpeak NG Arabic WASM 1.52 بترخيص GPL-3.0-or-later. مصدره محفوظ في `voice-engine/vendor/nabra-tts/src/vendor/espeak-ng-ar.mjs`، مع إشعار الرخصة في `voice-engine/vendor/nabra-tts/THIRD_PARTY_NOTICES.md`.
+- راجع ملفات المصدر والرخصة في المستودع واحتفظ بها عند إعادة التوزيع. Nabra يظل خيارًا تجريبيًا حتى اختبار النطق والأداء على Android فعلي.
 
 ## Ichkil والتشكيل العربي
 
-- يستخدم SAWT AI 1.5.20 نموذج Ichkil v0.3.0 لإضافة الحركات العربية تلقائيًا.
+- يستخدم SAWT AI 1.6.0 نموذج Ichkil v0.3.0 لإضافة الحركات العربية تلقائيًا.
 - ينزل ملف النموذج (نحو 22.3 MB) من مستودع النموذج عند أول استخدام ويخزنه محليًا؛ لا يُضمّن وزن النموذج داخل APK.
 - يعلن مستودع Ichkil عن ترخيص MIT للنموذج؛ احتفظ بإشعار الترخيص والرابط عند إعادة التوزيع.
 - يستخدم التطبيق ONNX Runtime Web 1.30.0 برخصة MIT، وAndroidX WebKit 1.18.0 برخصة Apache-2.0.
