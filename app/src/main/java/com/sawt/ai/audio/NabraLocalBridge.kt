@@ -145,11 +145,6 @@ class NabraLocalBridge(
         emit(NabraBridgeEvent.RuntimeReleased)
     }
 
-    @JavascriptInterface
-    fun onEngineReleased() {
-        emit(NabraBridgeEvent.RuntimeReleased)
-    }
-
     @Synchronized
     fun close() {
         closeActive(delete = true)
