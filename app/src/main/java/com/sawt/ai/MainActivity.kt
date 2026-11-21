@@ -638,18 +638,18 @@ private fun SawtStudio() {
                     Spacer(Modifier.height(9.dp))
                     OutlinedButton(
                         onClick = {
-                            if (!modelReady || generating || previewing) return@OutlinedButton
+                            if (!selectedVoiceReady || generating || previewing) return@OutlinedButton
                             previewing = true
                             lastFile = null
                             errorMessage = null
-                            status = "جارٍ تجهيز عينة قصيرة للصوت ${selectedVoice.name}…"
                             val previewLanguage = language
                             val previewVoice = selectedVoice
                             val previewSpeed = speed
-                            val sampleText = if (previewLanguage == "ar") {
-                                "السلام عليكم، هذا صوت ساوت إيه آي."
+                            val previewSteps = requestedNumSteps
+                            val sampleText = if (previewVoice.engineId == "nabra" || previewLanguage == "ar") {
+                                "السَّلَامُ عَلَيْكُمْ. هَذَا اخْتِبَارٌ لِلصَّوْتِ العَرَبِيِّ الفَصِيحِ."
                             } else {
-                                "Hello, this is SAWT AI."
+                                "Hello, this is a natural voice sample from SAWT."
                             }
                             val previewStartedAt = SystemClock.elapsedRealtime()
                             generationStartedAt = previewStartedAt
@@ -658,21 +658,38 @@ private fun SawtStudio() {
                             remainingEstimateUpdatedAt = previewStartedAt
                             hasRemainingEstimate = generationRemainingMs > 0L
                             generationStage = "جارٍ تجهيز عينة الصوت…"
-                            val previewKey = "$previewLanguage-${previewVoice.speakerId}-${String.format(Locale.US, "%.1f", previewSpeed)}"
+                            val previewKey = "${previewVoice.engineId}-${previewVoice.catalogId}-${previewLanguage}-${previewVoice.speakerId}-${String.format(Locale.US, "%.1f", previewSpeed)}-$previewSteps"
                             scope.launch {
                                 try {
                                     val cachedSample = previewCache[previewKey]
                                         ?.takeIf { it.isFile && it.length() > 44L }
-                                    val sample = cachedSample ?: engine.synthesizeToFile(
-                                        text = sampleText,
-                                        language = previewLanguage,
-                                        speakerId = previewVoice.speakerId,
-                                        speed = previewSpeed,
-                                        onStage = { stage -> mainHandler.post { generationStage = stage } },
-                                        onProgress = { completed, total ->
-                                            updateRemainingEstimate(completed, total, previewStartedAt, previewLanguage, previewSpeed)
-                                        }
-                                    ).also {
+                                    val sample = if (cachedSample != null) cachedSample else if (previewVoice.engineId == "nabra") {
+                                        val pack = voicePacks.firstOrNull { it.id == previewVoice.catalogId }
+                                            ?: throw IOException("حزمة الصوت غير موجودة في المكتبة.")
+                                        tashkeelEngine?.releaseModelMemory()
+                                        engine.releaseNativeModel()
+                                        ensureNabraEngine().synthesizeToFile(
+                                            sampleText,
+                                            pack,
+                                            previewSpeed,
+                                            onProgress = { name, loaded, total ->
+                                                val detail = if (total > 0L) "$name · ${(loaded * 100L / total).toInt().coerceIn(0, 100)}%" else name
+                                                mainHandler.post { generationStage = detail }
+                                            }
+                                        )
+                                    } else {
+                                        nabraEngine?.releaseRuntime()
+                                        engine.synthesizeToFile(
+                                            text = sampleText,
+                                            language = previewLanguage,
+                                            speakerId = previewVoice.speakerId,
+                                            speed = previewSpeed,
+                                            requestedNumSteps = previewSteps,
+                                            onProgress = { completed, total ->
+                                                updateRemainingEstimate(completed, total, previewStartedAt, previewLanguage, previewSpeed)
+                                            }
+                                        )
+                                    }.also {
                                         previewCache[previewKey] = it
                                         while (previewCache.size > MAX_PREVIEW_CACHE_ENTRIES) {
                                             val eldest = previewCache.entries.iterator()
@@ -685,22 +702,17 @@ private fun SawtStudio() {
                                     lastVoiceName = previewVoice.name
                                     lastLanguageName = if (previewLanguage == "ar") "العربية" else "English"
                                     SpeechPlaybackService.playFile(context, sample.absolutePath)
-                                    status = if (cachedSample != null) {
-                                        "عينة ${previewVoice.name} جاهزة من الذاكرة. بدأ التشغيل فورًا."
-                                    } else {
-                                        "تم تجهيز عينة ${previewVoice.name} وبدأ تشغيلها."
-                                    }
+                                    status = "اكتملت العينة وبدأ تشغيلها."
                                 } catch (cancelled: CancellationException) {
                                     throw cancelled
                                 } catch (error: Exception) {
-                                    errorMessage = error.message ?: "تعذّر إكمال عينة الصوت. راجع التفاصيل ثم أعد المحاولة."
-                                    status = "يمكنك إعادة تجربة العينة بعد معالجة الملاحظة الموضحة."
+                                    errorMessage = error.message ?: "تعذر تجهيز عينة الصوت."
                                 } finally {
                                     previewing = false
                                 }
                             }
                         },
-                        enabled = modelReady && engineWarmed && !modelLoading && !engineWarming && !generating && !previewing && !tashkeelWorking,
+                        enabled = selectedVoiceReady && !modelLoading && !engineWarming && !generating && !previewing && !tashkeelWorking && voicePackLoadingId == null,
                         modifier = Modifier.fillMaxWidth().height(46.dp),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Gold),
                         border = BorderStroke(1.dp, GoldSoft)
@@ -726,22 +738,29 @@ private fun SawtStudio() {
                         enabled = !controlsLocked,
                         colors = SliderDefaults.colors(thumbColor = Gold, activeTrackColor = Gold, inactiveTrackColor = SurfaceRaised)
                     )
-                    Text("وضع التحويل", color = TextMuted, fontSize = 12.sp)
+                    Text("جودة المعالجة", color = TextMuted, fontSize = 12.sp)
                     Spacer(Modifier.height(7.dp))
-                    Surface(
-                        color = Color(0xFF21394A),
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, Gold),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            "أولوية السرعة: خطوتان للتوليد، وأنوية أكثر ومقاطع أكبر حسب قدرة الهاتف.",
-                            color = Gold,
-                            fontSize = 11.sp,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 11.dp),
-                            textAlign = TextAlign.Center
-                        )
+                    Row(horizontalArrangement = Arrangement.spacedBy(7.dp), modifier = Modifier.fillMaxWidth()) {
+                        QualityButton("سريع", 4, requestedNumSteps == 4, Modifier.weight(1f), enabled = !controlsLocked && selectedVoice.engineId == "supertonic") {
+                            requestedNumSteps = 4
+                        }
+                        QualityButton("متوازن", 6, requestedNumSteps == 6, Modifier.weight(1f), enabled = !controlsLocked && selectedVoice.engineId == "supertonic") {
+                            requestedNumSteps = 6
+                        }
+                        QualityButton("أعلى جودة", 8, requestedNumSteps == 8, Modifier.weight(1f), enabled = !controlsLocked && selectedVoice.engineId == "supertonic") {
+                            requestedNumSteps = 8
+                        }
                     }
+                    Text(
+                        if (selectedVoice.engineId == "nabra") {
+                            "حزمة Nabra تستخدم إعدادات النموذج الأصلية."
+                        } else {
+                            "أعلى جودة تستخدم حتى 8 خطوات، وقد تستغرق وقتًا أطول. يخفّض التطبيق العدد تلقائيًا عند ضغط الذاكرة."
+                        },
+                        color = GoldSoft,
+                        fontSize = 10.sp,
+                        lineHeight = 16.sp
+                    )
 
                     Spacer(Modifier.height(23.dp))
                     Text("٥. حزمة الأصوات", color = TextMain, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
