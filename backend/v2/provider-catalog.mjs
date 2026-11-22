@@ -1,8 +1,8 @@
 const enabled = value => String(value || "").trim().toLowerCase() === "true";
 
 export function getProviderCatalog(env = process.env) {
-  const geminiConfigured = Boolean(env.GEMINI_API_KEY);
-  const easyVoiceConfigured = Boolean(env.EASYVOICE_API_KEY);
+  const geminiConfigured = Boolean(env.GEMINI_API_KEY) && enabled(env.GEMINI_FREE_TIER_CONFIRMED);
+  const easyVoiceConfigured = Boolean(env.EASYVOICE_API_KEY) && enabled(env.EASYVOICE_FREE_API_CONFIRMED);
   const azureFreeConfigured = Boolean(
     env.AZURE_SPEECH_KEY &&
     env.AZURE_SPEECH_REGION &&
@@ -25,7 +25,7 @@ export function getProviderCatalog(env = process.env) {
       class: "cloud",
       status: easyVoiceConfigured ? "available" : "needs_setup",
       freeTier: true,
-      freeTierNote: "5,000 حرف يوميًا على المفتاح المجاني، مشتركة مع موقع EasyVoice؛ صوتان فصحى، رجالي ونسائي. العربية في مرحلة beta وتحتاج اختبارًا سمعيًا.",
+      freeTierNote: "5,000 حرف يوميًا على المفتاح المجاني، مشتركة مع موقع EasyVoice؛ صوتان فصحى ar_m1 وar_f1. الحقوق التجارية متاحة على كل الخطط، والعربية beta وتحتاج اختبارًا سمعيًا.",
       dataConsentRequired: true,
       priority: 20,
       contentType: "audio/mpeg"
@@ -38,7 +38,7 @@ export function getProviderCatalog(env = process.env) {
       class: "cloud",
       status: geminiConfigured ? "available" : "needs_setup",
       freeTier: true,
-      freeTierNote: "الخطة المجانية محدودة وتتغير حدودها؛ قد تستخدم Google الطلبات لتحسين منتجاتها.",
+      freeTierNote: "فعّل فقط مع مشروع Gemini Developer API غير مربوط بالفوترة؛ الحصة المجانية محدودة وتتغير وقد تستخدم Google الطلبات لتحسين منتجاتها.",
       dataConsentRequired: true,
       priority: 10,
       contentType: "audio/wav"
