@@ -14,7 +14,7 @@ async function getJwks(fetchImpl = fetch) {
   if (!response.ok) throw new Error("FIREBASE_CERTIFICATES_UNAVAILABLE");
   const data = await response.json();
   if (!Array.isArray(data.keys) || data.keys.length === 0) throw new Error("FIREBASE_CERTIFICATES_INVALID");
-  const maxAge = Number(response.headers.get("cache-control")?.match(/max-age=(\\d+)/i)?.[1] || 3600);
+  const maxAge = Number(response.headers.get("cache-control")?.match(/max-age=(\d+)/i)?.[1] || 3600);
   jwksCache = data.keys;
   jwksExpiresAt = Date.now() + Math.min(Math.max(maxAge, 60), 6 * 60 * 60) * 1000;
   return jwksCache;
