@@ -34,7 +34,7 @@ async function readJson(req) {
 }
 
 async function authenticate(req, env) {
-  const match = /^Bearer\\s+(.+)$/i.exec(req.headers.authorization || "");
+  const match = /^Bearer\s+(.+)$/i.exec(req.headers.authorization || "");
   if (!match) throw Object.assign(new Error("AUTH_REQUIRED"), { status: 401 });
   try { return await verifyFirebaseIdToken(match[1], env.SAWT_FIREBASE_PROJECT_ID); }
   catch { throw Object.assign(new Error("AUTH_INVALID_OR_EXPIRED"), { status: 401 }); }
