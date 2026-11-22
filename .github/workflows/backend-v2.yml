@@ -1,0 +1,27 @@
+name: SAWT AI v2 backend tests
+
+on:
+  push:
+    branches: [redesign/sawt-ai-v2]
+    paths:
+      - 'backend/v2/**'
+      - '.github/workflows/backend-v2.yml'
+  pull_request:
+    paths:
+      - 'backend/v2/**'
+
+permissions:
+  contents: read
+
+jobs:
+  node-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Run isolated backend unit tests
+        working-directory: backend/v2
+        run: npm test
