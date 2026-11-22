@@ -39,6 +39,46 @@ async function checkedFetch(fetchImpl, url, options, providerId, timeoutMs = 120
   return response;
 }
 
+let easyVoiceRequests = [];
+let easyVoiceInFlight = 0;
+
+async function withEasyVoiceCapacity(task) {
+  const now = Date.now();
+  easyVoiceRequests = easyVoiceRequests.filter(timestamp => now - timestamp < 60_000);
+  if (easyVoiceRequests.length >= 20 || easyVoiceInFlight >= 2) {
+    throw new ProviderError("easyvoice-msa", 429, "EASYVOICE_FREE_RATE_LIMIT", true);
+  }
+  easyVoiceRequests.push(now);
+  easyVoiceInFlight += 1;
+  try { return await task(); }
+  finally { easyVoiceInFlight = Math.max(0, easyVoiceInFlight - 1); }
+}
+
+async function synthesizeEasyVoice({ text, voice, speed, providerId }, env, fetchImpl) {
+  if (!env.EASYVOICE_API_KEY) throw new ProviderError(providerId, 503, "EASYVOICE_NOT_CONFIGURED", true);
+  const voiceId = voice === "male" ? "ar_m1" : "ar_f1";
+  return withEasyVoiceCapacity(async () => {
+    const response = await checkedFetch(fetchImpl, "https://easyvoice.ae/api/v1/audio/speech", {
+      method: "POST",
+      headers: {
+        "Authorization": "Bearer " + env.EASYVOICE_API_KEY,
+        "Content-Type": "application/json",
+        "Accept": "audio/mpeg"
+      },
+      body: JSON.stringify({
+        model: "kokoro-82m",
+        input: text,
+        voice: voiceId,
+        response_format: "mp3",
+        speed: Math.min(2, Math.max(0.5, Number(speed || 1)))
+      })
+    }, providerId);
+    const audio = Buffer.from(await response.arrayBuffer());
+    const validMp3 = audio.length > 256 && (audio.toString("ascii", 0, 3) === "ID3" || (audio[0] === 0xff && (audio[1] & 0xe0) === 0xe0));
+    if (!validMp3) throw new ProviderError(providerId, 502, "EASYVOICE_AUDIO_INVALID", true);
+    return { audio, contentType: "audio/mpeg", extension: "mp3" };
+  });
+}
 async function synthesizeGemini({ text, voice, model, providerId }, env, fetchImpl) {
   if (!env.GEMINI_API_KEY) throw new ProviderError(providerId, 503, "GEMINI_NOT_CONFIGURED", true);
   const voiceName = voice === "male" ? "Puck" : "Kore";
@@ -132,6 +172,7 @@ async function synthesizeElevenLabs({ text, providerId }, env, fetchImpl) {
 
 export function createProviderAdapters(env = process.env, fetchImpl = fetch) {
   return {
+    "easyvoice-msa": args => synthesizeEasyVoice({ ...args, providerId: "easyvoice-msa" }, env, fetchImpl),
     "gemini-quality": args => synthesizeGemini({
       ...args, model: env.GEMINI_MODEL_QUALITY || "gemini-3.8-flash-tts", providerId: "gemini-quality"
     }, env, fetchImpl),
