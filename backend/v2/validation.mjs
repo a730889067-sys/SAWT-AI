@@ -18,7 +18,7 @@ export function validateSynthesisRequest(body, env = process.env) {
     };
   }
   const provider = body.provider === undefined ? "auto" : body.provider;
-  const allowedProviders = new Set(["auto", "gemini-quality", "gemini-fast", "azure-f0", "elevenlabs-personal"]);
+  const allowedProviders = new Set(["auto", "easyvoice-msa", "gemini-quality", "gemini-fast", "azure-f0", "elevenlabs-personal"]);
   if (typeof provider !== "string" || !allowedProviders.has(provider)) {
     return { ok: false, code: "INVALID_PROVIDER", message: "محرك الصوت المحدد غير معروف." };
   }
@@ -26,15 +26,18 @@ export function validateSynthesisRequest(body, env = process.env) {
   if (!new Set(["male", "female"]).has(voice)) {
     return { ok: false, code: "INVALID_VOICE", message: "اختر صوتًا رجاليًا أو نسائيًا." };
   }
-  const geminiCouldBeUsed = provider.startsWith("gemini-") || (provider === "auto" && Boolean(env.GEMINI_API_KEY));
-  if (geminiCouldBeUsed && body.cloudDataConsent !== true) {
+  const speed = body.speed === undefined ? 1 : Number(body.speed);
+  if (!Number.isFinite(speed) || speed < 0.5 || speed > 2.0) {
+    return { ok: false, code: "INVALID_SPEED", message: "سرعة النطق يجب أن تكون بين 0.5 و2.0." };
+  }
+  if (body.cloudDataConsent !== true) {
     return {
       ok: false,
       code: "CLOUD_DATA_CONSENT_REQUIRED",
-      message: "يلزم تأكيد موافقتك على إرسال النص إلى Google وفق شروط الخطة المجانية."
+      message: "يلزم تأكيد موافقتك على إرسال النص إلى مزود الصوت الخارجي."
     };
   }
-  return { ok: true, value: { text, provider, voice, cloudDataConsent: body.cloudDataConsent === true } };
+  return { ok: true, value: { text, provider, voice, speed, cloudDataConsent: true } };
 }
 
 export function escapeXml(value) {
