@@ -49,6 +49,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import com.sawt.ai.auth.SawtAuthSession
 import com.sawt.ai.auth.SawtFirebaseAuthManager
 import com.sawt.ai.audio.SawtCloudTtsClient
+import com.sawt.ai.audio.SawtCloudProvider
 import com.sawt.ai.audio.AudioHistoryEntry
 import com.sawt.ai.audio.AudioHistoryStore
 import com.sawt.ai.audio.NabraTtsEngine
@@ -208,6 +209,9 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
     }
     var showCloudConsent by remember { mutableStateOf(false) }
     var synthesisMode by remember { mutableStateOf("smart") }
+    var selectedCloudProvider by remember { mutableStateOf("auto") }
+    var cloudProviders by remember { mutableStateOf<List<SawtCloudProvider>>(emptyList()) }
+    var showCloudProviderChooser by remember { mutableStateOf(false) }
     val onlineReady = authSession != null && cloudTtsClient.isConfigured
     var voiceStorage by remember { mutableStateOf(engine.storageSnapshot()) }
     var extraVoiceStorageBytes by remember { mutableLongStateOf(0L) }
@@ -361,6 +365,14 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
     }
     LaunchedEffect(authSession?.localId, onlineReady, cloudConsentAccepted) {
         if (onlineReady && !cloudConsentAccepted) showCloudConsent = true
+        if (onlineReady && authSession != null) {
+            val validSession = withContext(Dispatchers.IO) { authManager.currentSession() }
+            if (validSession != null) {
+                cloudProviders = withContext(Dispatchers.IO) {
+                    runCatching { cloudTtsClient.listProviders(validSession) }.getOrDefault(emptyList())
+                }
+            }
+        }
     }
 
     LaunchedEffect(historyStore, voiceCatalogRepository) {        historyEntries = withContext(Dispatchers.IO) { historyStore.list() }
@@ -538,6 +550,13 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
                         color = TextMuted,
                         fontSize = 10.sp
                     )
+                    if (onlineReady) {
+                        TextButton(onClick = { showCloudProviderChooser = true }) {
+                            val providerName = cloudProviders.firstOrNull { it.id == selectedCloudProvider }?.name
+                                ?: if (selectedCloudProvider == "auto") "تلقائي — الأفضل المتاح" else selectedCloudProvider
+                            Text("محرك الإنترنت: " + providerName, color = Gold, fontSize = 11.sp)
+                        }
+                    }
                     Spacer(Modifier.height(14.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1069,8 +1088,8 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
                             remainingEstimateBaseMs = estimateGenerationMs(metricsPrefs, requestLanguage, requestSpeed, requestText.length)
                             generationRemainingMs = remainingEstimateBaseMs
                             remainingEstimateUpdatedAt = generationStartedAt
-                            hasRemainingEstimate = requestVoice.engineId == "supertonic" && generationRemainingMs > 0L
-                            generationStage = "جارٍ تجهيز محرك الصوت…"
+                            hasRemainingEstimate = requestVoice.engineId == "supertonic" && generationRemainingMs > 0L && !(synthesisMode == "smart" && onlineReady && cloudConsentAccepted && requestLanguage == "ar")
+                            generationStage = if (synthesisMode == "smart" && onlineReady && cloudConsentAccepted && requestLanguage == "ar") "جارٍ الاتصال بمحرك الصوت عبر الإنترنت…" else "جارٍ تجهيز محرك الصوت…"
                             val startedAt = generationStartedAt
                             scope.launch {
                                 try {
@@ -1085,7 +1104,9 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
                                                     session = validSession,
                                                     text = requestText,
                                                     voice = if (requestVoice.description.contains("رجالي")) "male" else "female",
-                                                    cloudDataConsent = cloudConsentAccepted
+                                                    cloudDataConsent = cloudConsentAccepted,
+                                                    provider = selectedCloudProvider,
+                                                    speed = requestSpeed
                                                 )
                                             }
                                         } catch (cancelled: CancellationException) {
@@ -1444,6 +1465,32 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
                 }
             }
 
+            if (showCloudProviderChooser) {
+                AlertDialog(
+                    onDismissRequest = { showCloudProviderChooser = false },
+                    containerColor = SurfaceDark,
+                    title = { Text("اختيار محرك الصوت", color = Gold) },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            TextButton(onClick = { selectedCloudProvider = "auto"; showCloudProviderChooser = false }) {
+                                Text("تلقائي — أعلى جودة متاحة", color = TextMain)
+                            }
+                            cloudProviders.filter { it.status == "available" || it.status == "available_personal_only" }.forEach { item ->
+                                Column {
+                                    TextButton(onClick = { selectedCloudProvider = item.id; showCloudProviderChooser = false }) {
+                                        Text(item.name, color = TextMain)
+                                    }
+                                    Text(item.note, color = TextMuted, fontSize = 10.sp, lineHeight = 15.sp)
+                                }
+                            }
+                            if (cloudProviders.none { it.status == "available" || it.status == "available_personal_only" }) {
+                                Text("لم يتم إعداد أي محرك مجاني على الخادم بعد.", color = TextMuted, fontSize = 12.sp)
+                            }
+                        }
+                    },
+                    confirmButton = { TextButton(onClick = { showCloudProviderChooser = false }) { Text("إغلاق", color = Gold) } }
+                )
+            }
             if (showCloudConsent) {
                 AlertDialog(
                     onDismissRequest = { showCloudConsent = false },
