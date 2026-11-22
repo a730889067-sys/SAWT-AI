@@ -1054,7 +1054,7 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
                     Spacer(Modifier.height(20.dp))
                     Button(
                         onClick = {
-                            if (!selectedVoiceReady || input.isBlank()) return@Button
+                            if (!canGenerate || input.isBlank()) return@Button
                             val requestText = input.trim()
                             val requestLanguage = language
                             val requestVoice = selectedVoice
@@ -1074,57 +1074,87 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
                             val startedAt = generationStartedAt
                             scope.launch {
                                 try {
-                                    val result = if (requestVoice.engineId == "nabra") {
-                                        val pack = voicePacks.firstOrNull { it.id == requestVoice.catalogId }
-                                            ?: throw IOException("حزمة الصوت غير موجودة في المكتبة.")
-                                        generationStage = "جارٍ تجهيز الصوت الفصيح الإضافي…"
-                                        tashkeelEngine?.releaseModelMemory()
-                                        engine.releaseNativeModel()
-                                        ensureNabraEngine().synthesizeToFile(
-                                            requestText,
-                                            pack,
-                                            requestSpeed,
-                                            onProgress = { name, loaded, total ->
-                                                val detail = if (total > 0L) {
-                                                    "$name · ${(loaded * 100L / total).toInt().coerceIn(0, 100)}%"
-                                                } else name
-                                                mainHandler.post { generationStage = detail }
+                                    var cloudFailureMessage: String? = null
+                                    val cloudResult = if (synthesisMode == "smart" && onlineReady && cloudConsentAccepted) {
+                                        generationStage = "جارٍ تحويل النص إلى صوت عبر الإنترنت…"
+                                        try {
+                                            val validSession = withContext(Dispatchers.IO) { authManager.currentSession() }
+                                                ?: throw IOException("انتهت جلسة الدخول. افتح التطبيق وسجّل الدخول مرة أخرى.")
+                                            withContext(Dispatchers.IO) {
+                                                cloudTtsClient.synthesize(
+                                                    session = validSession,
+                                                    text = requestText,
+                                                    voice = if (requestVoice.description.contains("رجالي")) "male" else "female",
+                                                    cloudDataConsent = cloudConsentAccepted
+                                                )
                                             }
-                                        )
-                                    } else {
-                                        nabraEngine?.releaseRuntime()
-                                        if (requestLanguage == "ar" && TashkeelTextProcessor.containsArabic(requestText)) {
-                                            generationStage = "جارٍ تحرير ذاكرة التشكيل لتجهيز الصوت…"
-                                            tashkeelEngine?.releaseModelMemory()
+                                        } catch (cancelled: CancellationException) {
+                                            throw cancelled
+                                        } catch (cloudError: Exception) {
+                                            cloudFailureMessage = cloudError.message ?: "محرك الإنترنت غير متاح."
+                                            null
                                         }
-                                        engine.synthesizeToFile(
-                                            text = requestText,
-                                            language = requestLanguage,
-                                            speakerId = requestVoice.speakerId,
-                                            speed = requestSpeed,
-                                            requestedNumSteps = requestSteps,
-                                            onStage = { stage -> mainHandler.post { generationStage = stage } },
-                                            onProgress = { completed, total ->
-                                                updateRemainingEstimate(completed, total, startedAt, requestLanguage, requestSpeed)
+                                    } else null
+                                    val usedCloud = cloudResult != null
+                                    val result = if (cloudResult != null) {
+                                        cloudResult.file
+                                    } else {
+                                        if (!selectedVoiceReadyForGeneration) {
+                                            throw IOException(cloudFailureMessage ?: "لا يوجد محرك صوت متاح. نزّل حزمة صوت أو أعد تسجيل الدخول.")
+                                        }
+                                        if (requestVoice.engineId == "nabra") {
+                                            val pack = voicePacks.firstOrNull { it.id == requestVoice.catalogId }
+                                                ?: throw IOException("حزمة الصوت غير موجودة في المكتبة.")
+                                            generationStage = "جارٍ تجهيز الصوت الفصيح الإضافي…"
+                                            tashkeelEngine?.releaseModelMemory()
+                                            engine.releaseNativeModel()
+                                            ensureNabraEngine().synthesizeToFile(
+                                                requestText,
+                                                pack,
+                                                requestSpeed,
+                                                onProgress = { name, loaded, total ->
+                                                    val detail = if (total > 0L) {
+                                                        name + " · " + (loaded * 100L / total).toInt().coerceIn(0, 100) + "%"
+                                                    } else name
+                                                    mainHandler.post { generationStage = detail }
+                                                }
+                                            )
+                                        } else {
+                                            nabraEngine?.releaseRuntime()
+                                            if (requestLanguage == "ar" && TashkeelTextProcessor.containsArabic(requestText)) {
+                                                generationStage = "جارٍ تحرير ذاكرة التشكيل لتجهيز الصوت…"
+                                                tashkeelEngine?.releaseModelMemory()
                                             }
-                                        )
+                                            engine.synthesizeToFile(
+                                                text = requestText,
+                                                language = requestLanguage,
+                                                speakerId = requestVoice.speakerId,
+                                                speed = requestSpeed,
+                                                requestedNumSteps = requestSteps,
+                                                onStage = { stage -> mainHandler.post { generationStage = stage } },
+                                                onProgress = { completed, total ->
+                                                    updateRemainingEstimate(completed, total, startedAt, requestLanguage, requestSpeed)
+                                                }
+                                            )
+                                        }
                                     }
-                                    val elapsedMs = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L)
-                                    val sampleRate = elapsedMs.toFloat() / requestText.length.coerceAtLeast(1)
-                                    val prefKey = "${requestVoice.engineId}_${generationRateKey(requestLanguage, requestSpeed)}"
-                                    val oldRate = metricsPrefs.getFloat(prefKey, 0f)
-                                    val smoothRate = if (oldRate > 0f) oldRate * 0.7f + sampleRate * 0.3f else sampleRate
-                                    metricsPrefs.edit { putFloat(prefKey, smoothRate) }
-
+                                    if (!usedCloud) {
+                                        val elapsedMs = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L)
+                                        val sampleRate = elapsedMs.toFloat() / requestText.length.coerceAtLeast(1)
+                                        val prefKey = requestVoice.engineId + "_" + generationRateKey(requestLanguage, requestSpeed)
+                                        val oldRate = metricsPrefs.getFloat(prefKey, 0f)
+                                        val smoothRate = if (oldRate > 0f) oldRate * 0.7f + sampleRate * 0.3f else sampleRate
+                                        metricsPrefs.edit { putFloat(prefKey, smoothRate) }
+                                    }
                                     val saved = runCatching {
                                         withContext(Dispatchers.IO) {
                                             val entry = historyStore.add(
                                                 source = result,
                                                 language = requestLanguage,
-                                                voiceName = requestVoice.name,
-                                                engineId = requestVoice.engineId,
+                                                voiceName = if (usedCloud) "صوت الإنترنت · " + cloudResult?.providerId else requestVoice.name,
+                                                engineId = if (usedCloud) "cloud_" + cloudResult?.providerId else requestVoice.engineId,
                                                 speed = requestSpeed,
-                                                qualitySteps = if (requestVoice.engineId == "nabra") 0 else requestSteps,
+                                                qualitySteps = if (usedCloud || requestVoice.engineId == "nabra") 0 else requestSteps,
                                                 text = requestText
                                             )
                                             Triple(entry, historyStore.audioFile(entry), historyStore.list())
@@ -1140,8 +1170,10 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
                                         errorMessage = "تم إنشاء التسجيل، لكن تعذر حفظ نسخة دائمة في المكتبة. نزّله الآن قبل إغلاق التطبيق."
                                         status = "التسجيل جاهز؛ لم تتوفر مساحة كافية لحفظه في السجل."
                                     }
-                                    lastVoiceName = requestVoice.name
+                                    lastVoiceName = if (usedCloud) "محرك الإنترنت · " + cloudResult?.providerId else requestVoice.name
                                     lastLanguageName = if (requestLanguage == "ar") "العربية" else "English"
+                                    if (usedCloud) status = "اكتمل التحويل عبر الإنترنت وحُفظ التسجيل."
+                                    else if (cloudFailureMessage != null) status = "تعذر المحرك السحابي مؤقتًا؛ اكتمل التحويل بالصوت المحلي."
                                     SpeechPlaybackService.playFile(context, (lastFile ?: result).absolutePath)
                                 } catch (cancelled: CancellationException) {
                                     throw cancelled
@@ -1153,7 +1185,7 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
                                 }
                             }
                         },
-                        enabled = selectedVoiceReadyForGeneration && !modelLoading && !engineWarming && !generating && !previewing && !tashkeelWorking && voicePackLoadingId == null && input.isNotBlank(),
+                        enabled = canGenerate && !modelLoading && !engineWarming && !generating && !previewing && !tashkeelWorking && voicePackLoadingId == null && input.isNotBlank(),
                         modifier = Modifier.fillMaxWidth().height(58.dp),
                         shape = RoundedCornerShape(18.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -1260,7 +1292,7 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
                                     Text("الصوت جاهز للاستماع", color = TextMain, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                     Text("$lastVoiceName · $lastLanguageName", color = GoldSoft, fontSize = 11.sp)
                                     Spacer(Modifier.height(7.dp))
-                                    Text("WAV · تسجيل صوتي", color = TextMuted, fontSize = 10.sp)
+                                    Text(if (lastFile?.extension.equals("mp3", true)) "MP3 · تسجيل صوتي" else "WAV · تسجيل صوتي", color = TextMuted, fontSize = 10.sp)
                                 }
                                 Spacer(Modifier.width(8.dp))
                                 IconButton(
