@@ -2,6 +2,7 @@ const enabled = value => String(value || "").trim().toLowerCase() === "true";
 
 export function getProviderCatalog(env = process.env) {
   const geminiConfigured = Boolean(env.GEMINI_API_KEY);
+  const easyVoiceConfigured = Boolean(env.EASYVOICE_API_KEY);
   const azureFreeConfigured = Boolean(
     env.AZURE_SPEECH_KEY &&
     env.AZURE_SPEECH_REGION &&
@@ -16,6 +17,19 @@ export function getProviderCatalog(env = process.env) {
   );
 
   return [
+    {
+      id: "easyvoice-msa",
+      company: "EasyVoice",
+      name: "Arabic MSA · Supertonic-3",
+      model: "Supertonic-3 Arabic (ar_m1 / ar_f1)",
+      class: "cloud",
+      status: easyVoiceConfigured ? "available" : "needs_setup",
+      freeTier: true,
+      freeTierNote: "5,000 حرف يوميًا على المفتاح المجاني، مشتركة مع موقع EasyVoice؛ صوتان فصحى، رجالي ونسائي. العربية في مرحلة beta وتحتاج اختبارًا سمعيًا.",
+      dataConsentRequired: true,
+      priority: 20,
+      contentType: "audio/mpeg"
+    },
     {
       id: "gemini-quality",
       company: "Google",
@@ -39,7 +53,7 @@ export function getProviderCatalog(env = process.env) {
       freeTier: true,
       freeTierNote: "خيار أسرع، ضمن الحصة المجانية وحدود الطلبات.",
       dataConsentRequired: true,
-      priority: 20,
+      priority: 30,
       contentType: "audio/wav"
     },
     {
@@ -52,7 +66,7 @@ export function getProviderCatalog(env = process.env) {
       freeTier: true,
       freeTierNote: "يُفعّل فقط عند تأكيد أن مورد Azure مضبوط على F0؛ الحصة المنشورة 500,000 حرف شهريًا.",
       dataConsentRequired: false,
-      priority: 30,
+      priority: 90,
       contentType: "audio/mpeg"
     },
     {
