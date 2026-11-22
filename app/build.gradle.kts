@@ -1,5 +1,8 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
+val sawtFirebaseWebApiKey = providers.gradleProperty("SAWT_FIREBASE_WEB_API_KEY").orElse("").get()
+val sawtFirebaseProjectId = providers.gradleProperty("SAWT_FIREBASE_PROJECT_ID").orElse("").get()
+
 plugins {
  id("com.android.application")
  id("org.jetbrains.kotlin.android")
