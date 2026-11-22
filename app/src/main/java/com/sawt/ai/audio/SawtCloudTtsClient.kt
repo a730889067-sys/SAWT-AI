@@ -66,7 +66,8 @@ class SawtCloudTtsClient(context: Context) {
         text: String,
         voice: String,
         cloudDataConsent: Boolean,
-        provider: String = "auto"
+        provider: String = "auto",
+        speed: Float = 1f
     ): SawtCloudAudio {
         check(isConfigured) { "خدمة الإنترنت غير مهيأة بعد." }
         val connection = open("/v2/synthesize", session.idToken, "POST").apply {
@@ -78,6 +79,7 @@ class SawtCloudTtsClient(context: Context) {
                 .put("text", text)
                 .put("voice", voice)
                 .put("provider", provider)
+                .put("speed", speed.toDouble())
                 .put("cloudDataConsent", cloudDataConsent)
             connection.outputStream.use { it.write(request.toString().toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
