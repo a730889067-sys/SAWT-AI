@@ -27,7 +27,7 @@ export function getProviderCatalog(env = process.env) {
       freeTier: true,
       freeTierNote: "5,000 حرف يوميًا على المفتاح المجاني، مشتركة مع موقع EasyVoice؛ صوتان فصحى ar_m1 وar_f1. الحقوق التجارية متاحة على كل الخطط، والعربية beta وتحتاج اختبارًا سمعيًا.",
       dataConsentRequired: true,
-      priority: 20,
+      priority: 10,
       contentType: "audio/mpeg"
     },
     {
@@ -40,7 +40,7 @@ export function getProviderCatalog(env = process.env) {
       freeTier: true,
       freeTierNote: "فعّل فقط مع مشروع Gemini Developer API غير مربوط بالفوترة؛ الحصة المجانية محدودة وتتغير وقد تستخدم Google الطلبات لتحسين منتجاتها.",
       dataConsentRequired: true,
-      priority: 10,
+      priority: 20,
       contentType: "audio/wav"
     },
     {
