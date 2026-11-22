@@ -141,6 +141,8 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val engine = remember(context) { SupertonicTtsEngine(context) }
+    val authManager = remember(context) { SawtFirebaseAuthManager(context) }
+    val cloudTtsClient = remember(context) { SawtCloudTtsClient(context) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val historyStore = remember(context) {
         AudioHistoryStore(File(context.filesDir, "audio_history"), maxEntries = 100)
@@ -200,6 +202,13 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
     var showDeleteConfirmation by remember { mutableStateOf(false) }
     var showVoiceManager by remember { mutableStateOf(false) }
     var showPerformanceDialog by remember { mutableStateOf(false) }
+    val cloudConsentPrefs = remember(context) { context.getSharedPreferences("sawt_cloud_privacy", Context.MODE_PRIVATE) }
+    var cloudConsentAccepted by remember(cloudConsentPrefs) {
+        mutableStateOf(cloudConsentPrefs.getBoolean("gemini_free_tier_data_consent", false))
+    }
+    var showCloudConsent by remember { mutableStateOf(false) }
+    var synthesisMode by remember { mutableStateOf("smart") }
+    val onlineReady = authSession != null && cloudTtsClient.isConfigured
     var voiceStorage by remember { mutableStateOf(engine.storageSnapshot()) }
     var extraVoiceStorageBytes by remember { mutableLongStateOf(0L) }
     var extraVoicePendingBytes by remember { mutableLongStateOf(0L) }
@@ -214,6 +223,7 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
     val selectedVoiceReady = if (selectedVoice.engineId == "nabra") selectedVoice.catalogId in installedPackIds else modelReady
     val selectedVoiceReadyForGeneration = selectedVoiceReady &&
         (selectedVoice.engineId == "nabra" || engineWarmed)
+    val canGenerate = selectedVoiceReadyForGeneration || (synthesisMode == "smart" && onlineReady && cloudConsentAccepted)
     val metricsPrefs = remember(context) {
         context.getSharedPreferences("sawt_generation_metrics", Context.MODE_PRIVATE)
     }
@@ -302,7 +312,12 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
         }
     }
 
-    LaunchedEffect(modelReady, engine) {
+    LaunchedEffect(modelReady, engine, onlineReady, synthesisMode) {
+        if (synthesisMode == "smart" && onlineReady) {
+            engineWarmed = true
+            engineWarming = false
+            return@LaunchedEffect
+        }
         if (!modelReady) {
             engineWarmed = false
             return@LaunchedEffect
@@ -344,8 +359,11 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
     DisposableEffect(nabraEngine) {
         onDispose { nabraEngine?.close() }
     }
-    LaunchedEffect(historyStore, voiceCatalogRepository) {
-        historyEntries = withContext(Dispatchers.IO) { historyStore.list() }
+    LaunchedEffect(authSession?.localId, onlineReady, cloudConsentAccepted) {
+        if (onlineReady && !cloudConsentAccepted) showCloudConsent = true
+    }
+
+    LaunchedEffect(historyStore, voiceCatalogRepository) {        historyEntries = withContext(Dispatchers.IO) { historyStore.list() }
         val refreshed = withContext(Dispatchers.IO) {
             runCatching { voiceCatalogRepository.refresh() }.getOrNull()
         }
@@ -481,6 +499,13 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
                             Text("SAWT", color = TextMain, fontSize = 21.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
                             Text("قراءة عربية وإنجليزية", color = TextMuted, fontSize = 11.sp)
                         }
+                        IconButton(
+                            onClick = { showVoiceManager = true; scope.launch { refreshVoiceStorage() } },
+                            enabled = !controlsLocked,
+                            modifier = Modifier.size(42.dp)
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = "مكتبة الأصوات دون إنترنت", tint = Gold, modifier = Modifier.size(23.dp))
+                        }
                         IconButton(onClick = { showHelp = true }, modifier = Modifier.size(42.dp)) {
                             Icon(Icons.Default.HelpOutline, contentDescription = "شرح الاستخدام", tint = Gold, modifier = Modifier.size(23.dp))
                         }
@@ -490,6 +515,29 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
                     Text("حوّل النص إلى تسجيل", color = TextMain, fontSize = 25.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(7.dp))
                     Text("تحكّم في النبرة والجودة، واحتفظ بتسجيلاتك", color = TextMuted, fontSize = 13.sp)
+                    Spacer(Modifier.height(10.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = synthesisMode == "smart",
+                            onClick = { synthesisMode = "smart" },
+                            label = { Text("ذكي: الإنترنت أولًا", fontSize = 10.sp) }
+                        )
+                        FilterChip(
+                            selected = synthesisMode == "offline",
+                            onClick = { synthesisMode = "offline" },
+                            label = { Text("دون إنترنت", fontSize = 10.sp) }
+                        )
+                    }
+                    Text(
+                        when {
+                            synthesisMode == "offline" -> "سيستخدم الأصوات التي نزّلتها على الهاتف."
+                            onlineReady && cloudConsentAccepted -> "التحويل السحابي مفعّل، والمحلي احتياطي عند توفره."
+                            onlineReady -> "وافق على معالجة النص لدى مزود الصوت لتفعيل التحويل السحابي."
+                            else -> "المحركات السحابية تحتاج إعداد حساب SAWT وخادم الخدمة."
+                        },
+                        color = TextMuted,
+                        fontSize = 10.sp
+                    )
                     Spacer(Modifier.height(14.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1364,6 +1412,31 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
                 }
             }
 
+            if (showCloudConsent) {
+                AlertDialog(
+                    onDismissRequest = { showCloudConsent = false },
+                    containerColor = SurfaceDark,
+                    title = { Text("معالجة النص عبر الإنترنت", color = Gold) },
+                    text = {
+                        Text(
+                            "عند استخدام Gemini ضمن المستوى المجاني، قد تستخدم Google النصوص والملفات المرسلة لتحسين منتجاتها. لا ترسل كلمات مرور أو معلومات سرية. لن نرسل نصك إلى المحرك السحابي قبل موافقتك.",
+                            color = TextMain,
+                            fontSize = 12.sp,
+                            lineHeight = 19.sp
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            cloudConsentPrefs.edit { putBoolean("gemini_free_tier_data_consent", true) }
+                            cloudConsentAccepted = true
+                            showCloudConsent = false
+                        }) { Text("أوافق وأتابع", color = Gold) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showCloudConsent = false }) { Text("لا أوافق", color = TextMuted) }
+                    }
+                )
+            }
             if (showVoiceManager) {
                 AlertDialog(
                     onDismissRequest = { if (!modelLoading && voicePackLoadingId == null) showVoiceManager = false },
