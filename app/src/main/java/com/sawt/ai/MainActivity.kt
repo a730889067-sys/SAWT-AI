@@ -531,7 +531,7 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
                     Text(
                         when {
                             synthesisMode == "offline" -> "سيستخدم الأصوات التي نزّلتها على الهاتف."
-                            onlineReady && cloudConsentAccepted -> "التحويل السحابي مفعّل، والمحلي احتياطي عند توفره."
+                            onlineReady && cloudConsentAccepted -> "التحويل السحابي العربي مفعّل، والمحلي احتياطي عند توفره."
                             onlineReady -> "وافق على معالجة النص لدى مزود الصوت لتفعيل التحويل السحابي."
                             else -> "المحركات السحابية تحتاج إعداد حساب SAWT وخادم الخدمة."
                         },
@@ -1075,7 +1075,7 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
                             scope.launch {
                                 try {
                                     var cloudFailureMessage: String? = null
-                                    val cloudResult = if (synthesisMode == "smart" && onlineReady && cloudConsentAccepted) {
+                                    val cloudResult = if (synthesisMode == "smart" && onlineReady && cloudConsentAccepted && requestLanguage == "ar") {
                                         generationStage = "جارٍ تحويل النص إلى صوت عبر الإنترنت…"
                                         try {
                                             val validSession = withContext(Dispatchers.IO) { authManager.currentSession() }
