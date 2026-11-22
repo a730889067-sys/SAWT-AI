@@ -66,7 +66,7 @@ export function getProviderCatalog(env = process.env) {
       freeTier: true,
       freeTierNote: "يُفعّل فقط عند تأكيد أن مورد Azure مضبوط على F0؛ الحصة المنشورة 500,000 حرف شهريًا.",
       dataConsentRequired: false,
-      priority: 90,
+      priority: 40,
       contentType: "audio/mpeg"
     },
     {
@@ -79,7 +79,7 @@ export function getProviderCatalog(env = process.env) {
       freeTier: true,
       freeTierNote: "الخطة المجانية محدودة، مكتبة الأصوات غير متاحة عبر API للمجاني، والاستخدام التجاري يتطلب خطة مرخصة. لا يُستخدم في نسخة عامة.",
       dataConsentRequired: false,
-      priority: 40,
+      priority: 90,
       contentType: "audio/mpeg"
     }
   ];
