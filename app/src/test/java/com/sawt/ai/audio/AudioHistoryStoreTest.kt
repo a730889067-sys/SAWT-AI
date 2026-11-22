@@ -117,7 +117,7 @@ class AudioHistoryStoreTest {
         val entry = store.add(source, "ar", "M1", "supertonic", 1.0f, 8, "قديم")
         val index = File(root, "history/history.tsv")
         val oldRow = index.readText().trim().split('|').take(8).joinToString("|")
-        index.writeText(oldRow + "\\n")
+        index.writeText(oldRow + "\n")
         val loaded = AudioHistoryStore(File(root, "history")).list().single()
         assertEquals(entry.id, loaded.id)
         assertEquals("wav", loaded.format)
