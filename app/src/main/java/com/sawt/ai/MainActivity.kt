@@ -46,6 +46,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalLayoutDirection
+import com.sawt.ai.auth.SawtAuthSession
+import com.sawt.ai.auth.SawtFirebaseAuthManager
+import com.sawt.ai.audio.SawtCloudTtsClient
 import com.sawt.ai.audio.AudioHistoryEntry
 import com.sawt.ai.audio.AudioHistoryStore
 import com.sawt.ai.audio.NabraTtsEngine
@@ -104,12 +107,37 @@ private val femaleVoices = listOf(
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { SawtStudio() }
+        setContent { SawtAppRoot() }
     }
 }
 
 @Composable
-private fun SawtStudio() {
+private fun SawtAppRoot() {
+    val context = LocalContext.current
+    val authManager = remember(context) { SawtFirebaseAuthManager(context) }
+    val cloudConfigured = authManager.isConfigured && BuildConfig.SAWT_API_BASE_URL.startsWith("https://")
+    var session by remember { mutableStateOf<SawtAuthSession?>(null) }
+    var checkingSession by remember { mutableStateOf(cloudConfigured) }
+    LaunchedEffect(cloudConfigured) {
+        if (cloudConfigured) {
+            session = withContext(Dispatchers.IO) { authManager.currentSession() }
+            checkingSession = false
+        }
+    }
+    when {
+        !cloudConfigured -> SawtStudio()
+        checkingSession -> MaterialTheme(colorScheme = darkColorScheme()) {
+            Box(Modifier.fillMaxSize().background(Color(0xFF0D1924)), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = Color(0xFFD8B56D))
+            }
+        }
+        session != null -> SawtStudio(authSession = session)
+        else -> SawtLoginScreen(authManager = authManager, onSignedIn = { session = it })
+    }
+}
+
+@Composable
+private fun SawtStudio(authSession: SawtAuthSession? = null) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val engine = remember(context) { SupertonicTtsEngine(context) }
