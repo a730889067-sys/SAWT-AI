@@ -1969,14 +1969,19 @@ private fun HelpSection(title: String, body: String) {
 }
 
 private fun saveAudioToDownloads(context: Context, source: File): String {
-    if (!source.isFile || source.length() < 44L) {
-        throw IOException("ملف الصوت غير موجود أو غير مكتمل.")
+    if (!source.isFile) throw IOException("ملف الصوت غير موجود.")
+    val extension = source.extension.lowercase(Locale.ROOT)
+    val (mimeType, minimumBytes) = when (extension) {
+        "wav" -> "audio/wav" to 44L
+        "mp3" -> "audio/mpeg" to 256L
+        else -> throw IOException("صيغة التسجيل غير مدعومة للتنزيل.")
     }
-    val filename = "SAWT-${System.currentTimeMillis()}.wav"
+    if (source.length() < minimumBytes) throw IOException("ملف الصوت غير مكتمل.")
+    val filename = "SAWT-" + System.currentTimeMillis() + "." + extension
     if (Build.VERSION.SDK_INT >= 29) {
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
-            put(MediaStore.MediaColumns.MIME_TYPE, "audio/wav")
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
             put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/SAWT AI")
             put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
@@ -1989,9 +1994,7 @@ private fun saveAudioToDownloads(context: Context, source: File): String {
             output.use { stream ->
                 source.inputStream().use { input -> input.copyTo(stream) }
             }
-            val ready = ContentValues().apply {
-                put(MediaStore.MediaColumns.IS_PENDING, 0)
-            }
+            val ready = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
             if (resolver.update(uri, ready, null, null) <= 0) {
                 throw IOException("تعذر إكمال حفظ ملف الصوت.")
             }
@@ -2003,9 +2006,7 @@ private fun saveAudioToDownloads(context: Context, source: File): String {
         val baseFolder = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
             ?: throw IOException("مساحة التنزيلات الخارجية غير متاحة.")
         val folder = File(baseFolder, "SAWT AI")
-        if (!folder.exists() && !folder.mkdirs()) {
-            throw IOException("تعذر إنشاء مجلد SAWT AI.")
-        }
+        if (!folder.exists() && !folder.mkdirs()) throw IOException("تعذر إنشاء مجلد SAWT AI.")
         val destination = File(folder, filename)
         try {
             source.copyTo(destination, overwrite = true)
