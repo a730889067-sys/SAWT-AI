@@ -21,7 +21,7 @@ async function readProviderError(response) {
 }
 
 function retryableStatus(status) {
-  return [408, 429, 500, 502, 503, 504].includes(status);
+  return [0, 401, 403, 404, 408, 429, 500, 502, 503, 504].includes(status);
 }
 
 async function checkedFetch(fetchImpl, url, options, providerId, timeoutMs = 120_000) {
@@ -79,7 +79,7 @@ async function synthesizeEasyVoice({ text, voice, speed, providerId }, env, fetc
     return { audio, contentType: "audio/mpeg", extension: "mp3" };
   });
 }
-async function synthesizeGemini({ text, voice, model, providerId }, env, fetchImpl) {
+async function synthesizeGemini({ text, voice, model, providerId, speed }, env, fetchImpl) {
   if (!env.GEMINI_API_KEY) throw new ProviderError(providerId, 503, "GEMINI_NOT_CONFIGURED", true);
   const voiceName = voice === "male" ? "Puck" : "Kore";
   const url = "https://generativelanguage.googleapis.com/v1beta/models/" +
@@ -90,7 +90,7 @@ async function synthesizeGemini({ text, voice, model, providerId }, env, fetchIm
       parts: [{
         text,
         speechMetadata: {
-          style: "Read the exact text in clear, formal Modern Standard Arabic (Al-Fusha). Use careful Arabic articulation, neutral delivery, natural pauses, and do not add or omit words."
+          style: "Read the exact text in clear, formal Modern Standard Arabic (Al-Fusha). Use careful Arabic articulation, neutral delivery, natural pauses, and do not add or omit words. Target speaking rate: " + String(speed || 1) + "x."
         }
       }]
     }],
@@ -142,7 +142,7 @@ async function synthesizeAzure({ text, voice, providerId }, env, fetchImpl) {
   return { audio, contentType: "audio/mpeg", extension: "mp3" };
 }
 
-async function synthesizeElevenLabs({ text, providerId }, env, fetchImpl) {
+async function synthesizeElevenLabs({ text, speed, providerId }, env, fetchImpl) {
   const personalOnly = String(env.SAWT_DISTRIBUTION_SCOPE || "").toLowerCase() === "personal" &&
     String(env.ELEVENLABS_FREE_PERSONAL_CONSENT || "").toLowerCase() === "true";
   if (!personalOnly || !env.ELEVENLABS_API_KEY || !env.ELEVENLABS_VOICE_ID) {
@@ -162,7 +162,7 @@ async function synthesizeElevenLabs({ text, providerId }, env, fetchImpl) {
       text,
       model_id: model,
       language_code: "ar",
-      voice_settings: { stability: 0.55, similarity_boost: 0.8, style: 0.15, use_speaker_boost: true }
+      voice_settings: { stability: 0.55, similarity_boost: 0.8, style: 0.15, use_speaker_boost: true, speed: Math.min(1.2, Math.max(0.7, Number(speed || 1))) }
     })
   }, providerId);
   const audio = Buffer.from(await response.arrayBuffer());
