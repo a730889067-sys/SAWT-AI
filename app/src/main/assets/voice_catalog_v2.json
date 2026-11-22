@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 2,
+  "updatedAt": "2026-11-22",
+  "policy": "Only downloadable models with verified redistribution licenses, pinned revisions and SHA-256 are installable. Candidate models are visible for research but not downloadable until Android runtime and license checks pass.",
+  "voices": [
+    {
+      "id": "supertonic-3-local",
+      "name": "Supertonic 3 · Arabic / English",
+      "engine": "sherpa-onnx",
+      "status": "integrated-current-engine",
+      "languages": ["ar", "en"],
+      "license": "OpenRAIL-M",
+      "gender": "multiple-reference-speakers",
+      "downloadable": true,
+      "notes": "Existing local engine. Arabic support is not a guarantee of perfect MSA pronunciation; compare voices and step counts on real devices."
+    },
+    {
+      "id": "nabra-7m-distill-msa",
+      "name": "Nabra 7M Distill · Modern Standard Arabic",
+      "engine": "onnx-webview-bridge",
+      "status": "experimental-existing-pack",
+      "languages": ["ar"],
+      "license": "Apache-2.0 model/library; bundled eSpeak NG component GPL-3.0-or-later",
+      "gender": "female",
+      "downloadable": true,
+      "notes": "One experimental female MSA voice. Must pass listening and mobile performance tests before being marked recommended."
+    },
+    {
+      "id": "silma-tts-v1",
+      "name": "SILMA TTS v1 · Arabic Fusha / English",
+      "engine": "f5-tts-pytorch",
+      "status": "android-port-required",
+      "languages": ["ar", "en"],
+      "license": "Apache-2.0 weights; MIT code",
+      "gender": "voice-reference-conditioned",
+      "downloadable": false,
+      "notes": "150M parameters. Current upstream usage is PyTorch/F5-TTS; Android ONNX/runtime compatibility and device speed are unverified. Do not expose as installable until port and checksums exist.",
+      "sourceUrl": "https://huggingface.co/silma-ai/silma-tts"
+    },
+    {
+      "id": "piper-arabic-community",
+      "name": "Piper Arabic community voices",
+      "engine": "piper-vits",
+      "status": "license-and-dialect-review",
+      "languages": ["ar"],
+      "license": "Per-model license must be reviewed; some entries unspecified",
+      "gender": "multiple",
+      "downloadable": false,
+      "notes": "Available voices include Jordanian/Saudi and Emirati pronunciations; not assumed to be neutral MSA.",
+      "sourceUrl": "https://piperhub.org/voices/language/ar/"
+    },
+    {
+      "id": "meta-mms-tts-ara",
+      "name": "Meta MMS Arabic TTS",
+      "engine": "vits-pytorch",
+      "status": "excluded-noncommercial-license",
+      "languages": ["ar"],
+      "license": "CC-BY-NC-4.0",
+      "gender": "single-model",
+      "downloadable": false,
+      "notes": "Non-commercial license; excluded from the public SAWT AI distribution.",
+      "sourceUrl": "https://huggingface.co/facebook/mms-tts-ara"
+    }
+  ]
+}
