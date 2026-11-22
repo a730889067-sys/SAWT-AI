@@ -2,6 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { getProviderCatalog, getEligibleProviderIds } from "../provider-catalog.mjs";
 
+test("EasyVoice Arabic MSA voices activate only with a server key", () => {
+  assert.equal(getProviderCatalog({}).find(x => x.id === "easyvoice-msa").status, "needs_setup");
+  const configured = getProviderCatalog({ EASYVOICE_API_KEY: "test-key" }).find(x => x.id === "easyvoice-msa");
+  assert.equal(configured.status, "available");
+  assert.match(configured.freeTierNote, /5,000/);
+});
+
 test("Gemini engines need a server key", () => {
   const catalog = getProviderCatalog({});
   assert.equal(catalog.find(x => x.id === "gemini-quality").status, "needs_setup");
