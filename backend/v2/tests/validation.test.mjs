@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { validateSynthesisRequest, escapeXml } from "../validation.mjs";
 
 test("accepts MSA text without corrupting Unicode", () => {
-  const result = validateSynthesisRequest({ text: "إِنَّ الْعِلْمَ نُورٌ", provider: "auto", voice: "female" });
+  const result = validateSynthesisRequest({ text: "إِنَّ الْعِلْمَ نُورٌ", provider: "auto", voice: "female", cloudDataConsent: true });
   assert.equal(result.ok, true);
   assert.equal(result.value.text, "إِنَّ الْعِلْمَ نُورٌ");
 });
