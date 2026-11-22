@@ -4,15 +4,21 @@ import { getProviderCatalog, getEligibleProviderIds } from "../provider-catalog.
 
 test("EasyVoice Arabic MSA voices activate only with a server key", () => {
   assert.equal(getProviderCatalog({}).find(x => x.id === "easyvoice-msa").status, "needs_setup");
-  const configured = getProviderCatalog({ EASYVOICE_API_KEY: "test-key" }).find(x => x.id === "easyvoice-msa");
+  const configuredWithoutFreeFlag = getProviderCatalog({ EASYVOICE_API_KEY: "test-key" }).find(x => x.id === "easyvoice-msa");
+  assert.equal(configuredWithoutFreeFlag.status, "needs_setup");
+  const configured = getProviderCatalog({ EASYVOICE_API_KEY: "test-key", EASYVOICE_FREE_API_CONFIRMED: "true" }).find(x => x.id === "easyvoice-msa");
   assert.equal(configured.status, "available");
   assert.match(configured.freeTierNote, /5,000/);
 });
 
-test("Gemini engines need a server key", () => {
+test("Gemini engines require a key and explicit free-tier confirmation", () => {
   const catalog = getProviderCatalog({});
   assert.equal(catalog.find(x => x.id === "gemini-quality").status, "needs_setup");
   assert.equal(catalog.find(x => x.id === "gemini-fast").status, "needs_setup");
+  const keyOnly = getProviderCatalog({ GEMINI_API_KEY: "test-key" });
+  assert.equal(keyOnly.find(x => x.id === "gemini-quality").status, "needs_setup");
+  const free = getProviderCatalog({ GEMINI_API_KEY: "test-key", GEMINI_FREE_TIER_CONFIRMED: "true" });
+  assert.equal(free.find(x => x.id === "gemini-quality").status, "available");
 });
 
 test("Azure is enabled only for confirmed F0, never S0", () => {
