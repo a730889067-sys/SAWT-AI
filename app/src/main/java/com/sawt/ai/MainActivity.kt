@@ -205,7 +205,7 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
     var showPerformanceDialog by remember { mutableStateOf(false) }
     val cloudConsentPrefs = remember(context) { context.getSharedPreferences("sawt_cloud_privacy", Context.MODE_PRIVATE) }
     var cloudConsentAccepted by remember(cloudConsentPrefs) {
-        mutableStateOf(cloudConsentPrefs.getBoolean("gemini_free_tier_data_consent", false))
+        mutableStateOf(cloudConsentPrefs.getBoolean("cloud_tts_data_consent", false))
     }
     var showCloudConsent by remember { mutableStateOf(false) }
     var synthesisMode by remember { mutableStateOf("smart") }
@@ -1088,7 +1088,7 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
                             remainingEstimateBaseMs = estimateGenerationMs(metricsPrefs, requestLanguage, requestSpeed, requestText.length)
                             generationRemainingMs = remainingEstimateBaseMs
                             remainingEstimateUpdatedAt = generationStartedAt
-                            hasRemainingEstimate = requestVoice.engineId == "supertonic" && generationRemainingMs > 0L && !(synthesisMode == "smart" && onlineReady && cloudConsentAccepted && requestLanguage == "ar")
+                            hasRemainingEstimate = requestVoice.engineId == "supertonic" && generationRemainingMs > 0L && !(synthesisMode == "smart" && onlineReady && cloudConsentAccepted && requestLanguage == "ar") && !(synthesisMode == "smart" && onlineReady && cloudConsentAccepted && requestLanguage == "ar")
                             generationStage = if (synthesisMode == "smart" && onlineReady && cloudConsentAccepted && requestLanguage == "ar") "جارٍ الاتصال بمحرك الصوت عبر الإنترنت…" else "جارٍ تجهيز محرك الصوت…"
                             val startedAt = generationStartedAt
                             scope.launch {
@@ -1498,7 +1498,7 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
                     title = { Text("معالجة النص عبر الإنترنت", color = Gold) },
                     text = {
                         Text(
-                            "عند استخدام Gemini ضمن المستوى المجاني، قد تستخدم Google النصوص والملفات المرسلة لتحسين منتجاتها. لا ترسل كلمات مرور أو معلومات سرية. لن نرسل نصك إلى المحرك السحابي قبل موافقتك.",
+                            "سيُرسل النص إلى محرك الصوت السحابي الذي تختاره. قد تستخدم Google محتوى الطلبات في المستوى المجاني لتحسين منتجاتها. لا ترسل كلمات مرور أو بيانات سرية. لن يرسل SAWT AI النص قبل موافقتك.",
                             color = TextMain,
                             fontSize = 12.sp,
                             lineHeight = 19.sp
@@ -1506,7 +1506,7 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
                     },
                     confirmButton = {
                         TextButton(onClick = {
-                            cloudConsentPrefs.edit { putBoolean("gemini_free_tier_data_consent", true) }
+                            cloudConsentPrefs.edit { putBoolean("cloud_tts_data_consent", true) }
                             cloudConsentAccepted = true
                             showCloudConsent = false
                         }) { Text("أوافق وأتابع", color = Gold) }
@@ -1662,6 +1662,16 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
                                         }
                                     }
                                 }
+                            }
+                            Divider(color = Border)
+                            Text("نماذج إضافية قيد التهيئة", color = Gold, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Text("SILMA TTS v1 · العربية الفصحى والإنجليزية · 150M", color = TextMain, fontSize = 11.sp)
+                                Text("مرشح للتنزيل لاحقًا؛ نجهّز تشغيله على Android ونقيس السرعة قبل إظهار زر التنزيل.", color = TextMuted, fontSize = 10.sp, lineHeight = 15.sp)
+                                Text("Piper Arabic · أصوات مجتمعية", color = TextMain, fontSize = 11.sp)
+                                Text("قيد فحص تراخيص الأصوات واللهجات؛ لن نضيف صوتًا غير موثوق للفصحى.", color = TextMuted, fontSize = 10.sp, lineHeight = 15.sp)
+                                Text("Meta MMS Arabic", color = TextMain, fontSize = 11.sp)
+                                Text("مستبعد من النسخة العامة بسبب ترخيص غير تجاري.", color = TextMuted, fontSize = 10.sp)
                             }
                             Divider(color = Border)
                             Text("التسجيلات المحفوظة: ${formatStorageBytes(recordingsStorageBytes)}", color = TextMuted, fontSize = 10.sp)
