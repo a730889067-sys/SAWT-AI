@@ -85,6 +85,52 @@ class AudioHistoryStoreTest {
         assertEquals(listOf("الأحدث"), limited.list().map { it.text })
     }
 
+    @Test fun savesAndReloadsCloudMp3Recordings() {
+        val mp3 = File(root, "cloud-source.mp3")
+        writeMp3(mp3)
+        val entry = store.add(
+            source = mp3,
+            language = "ar",
+            voiceName = "صوت الإنترنت · easyvoice-msa",
+            engineId = "cloud_easyvoice-msa",
+            speed = 1.0f,
+            qualitySteps = 0,
+            text = "السَّلَامُ عَلَيْكُمْ",
+            createdAtMillis = 200L
+        )
+        assertEquals("mp3", entry.format)
+        val savedFile = store.audioFile(entry)
+        assertNotNull(savedFile)
+        assertEquals("mp3", savedFile!!.extension)
+        assertTrue(savedFile.length() >= 256L)
+
+        val reloaded = AudioHistoryStore(File(root, "history")).list().single()
+        assertEquals(entry.id, reloaded.id)
+        assertEquals("cloud_easyvoice-msa", reloaded.engineId)
+        assertEquals("mp3", reloaded.format)
+        assertEquals("السَّلَامُ عَلَيْكُمْ", reloaded.text)
+        assertTrue(store.delete(entry.id))
+        assertFalse(savedFile.exists())
+    }
+
+    @Test fun readsLegacyEightFieldWavHistoryRows() {
+        val entry = store.add(source, "ar", "M1", "supertonic", 1.0f, 8, "قديم")
+        val index = File(root, "history/history.tsv")
+        val oldRow = index.readText().trim().split('|').take(8).joinToString("|")
+        index.writeText(oldRow + "\\n")
+        val loaded = AudioHistoryStore(File(root, "history")).list().single()
+        assertEquals(entry.id, loaded.id)
+        assertEquals("wav", loaded.format)
+    }
+
+    private fun writeMp3(file: File) {
+        val bytes = ByteArray(320)
+        bytes[0] = 'I'.code.toByte()
+        bytes[1] = 'D'.code.toByte()
+        bytes[2] = '3'.code.toByte()
+        file.writeBytes(bytes)
+    }
+
     @Test fun rejectsOneRecordingLargerThanTheLibraryLimit() {
         val limited = AudioHistoryStore(File(root, "too-small"), maxEntries = 10, maxTotalBytes = 100L)
         try {
