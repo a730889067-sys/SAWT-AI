@@ -1,13 +1,14 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
-val sawtFirebaseWebApiKey = providers.gradleProperty("SAWT_FIREBASE_WEB_API_KEY").orElse("").get()
-val sawtFirebaseProjectId = providers.gradleProperty("SAWT_FIREBASE_PROJECT_ID").orElse("").get()
 
 plugins {
  id("com.android.application")
  id("org.jetbrains.kotlin.android")
  id("org.jetbrains.kotlin.plugin.compose")
 }
+
+val sawtFirebaseWebApiKey = providers.gradleProperty("SAWT_FIREBASE_WEB_API_KEY").orElse("").get()
+val sawtFirebaseProjectId = providers.gradleProperty("SAWT_FIREBASE_PROJECT_ID").orElse("").get()
 android {
  namespace = "com.sawt.ai"
  compileSdk = 36
@@ -25,10 +26,14 @@ android {
   getByName("debug") {
    val apiUrl = providers.gradleProperty("SAWT_API_BASE_URL").orElse("").get()
    buildConfigField("String", "SAWT_API_BASE_URL", "\"$apiUrl\"")
+   buildConfigField("String", "SAWT_FIREBASE_WEB_API_KEY", "\"$sawtFirebaseWebApiKey\"")
+   buildConfigField("String", "SAWT_FIREBASE_PROJECT_ID", "\"$sawtFirebaseProjectId\"")
   }
   getByName("release") {
    val apiUrl = providers.gradleProperty("SAWT_API_BASE_URL").orElse("").get()
    buildConfigField("String", "SAWT_API_BASE_URL", "\"$apiUrl\"")
+   buildConfigField("String", "SAWT_FIREBASE_WEB_API_KEY", "\"$sawtFirebaseWebApiKey\"")
+   buildConfigField("String", "SAWT_FIREBASE_PROJECT_ID", "\"$sawtFirebaseProjectId\"")
   }
  }
  packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
