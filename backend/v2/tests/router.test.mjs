@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { synthesizeWithFallback } from "../router.mjs";
 
 test("auto route falls back only through configured free providers", async () => {
-  const env = { GEMINI_API_KEY: "test-key" };
+  const env = { GEMINI_API_KEY: "test-key", GEMINI_FREE_TIER_CONFIRMED: "true" };
   const calls = [];
   const adapters = {
     "gemini-quality": async () => { calls.push("gemini-quality"); const error = new Error("quota"); error.status = 429; error.retryable = true; throw error; },
@@ -17,7 +17,7 @@ test("auto route falls back only through configured free providers", async () =>
 });
 
 test("manual selection never silently changes provider", async () => {
-  const env = { GEMINI_API_KEY: "test-key" };
+  const env = { GEMINI_API_KEY: "test-key", GEMINI_FREE_TIER_CONFIRMED: "true" };
   const calls = [];
   const adapters = {
     "gemini-quality": async () => { calls.push("quality"); const error = new Error("quota"); error.status = 429; error.retryable = true; throw error; },
