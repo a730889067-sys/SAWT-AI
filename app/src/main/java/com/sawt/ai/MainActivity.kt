@@ -1391,7 +1391,7 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
                                                 Text("${entry.voiceName} · ${if (entry.language == "ar") "العربية" else "English"}", color = Gold, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                                                 Text(formatHistoryDate(entry.createdAtMillis), color = TextMuted, fontSize = 9.sp)
                                             }
-                                            Text(if (entry.engineId == "nabra") "Nabra" else "${entry.qualitySteps} خطوات", color = TextMuted, fontSize = 9.sp)
+                                            Text(when { entry.engineId == "nabra" -> "Nabra"; entry.engineId.startsWith("cloud_") -> "عبر الإنترنت · ${entry.format.uppercase()}"; else -> "${entry.qualitySteps} خطوات · WAV" }, color = TextMuted, fontSize = 9.sp)
                                         }
                                         Spacer(Modifier.height(5.dp))
                                         Text(entry.text.take(120), color = TextMain, fontSize = 11.sp, lineHeight = 17.sp, maxLines = 2)
@@ -1675,7 +1675,7 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
                             }
                             Divider(color = Border)
                             Text("التسجيلات المحفوظة: ${formatStorageBytes(recordingsStorageBytes)}", color = TextMuted, fontSize = 10.sp)
-                            Text("حذف حزمة صوت لا يحذف مكتبة التسجيلات أو ملفات WAV.", color = GoldSoft, fontSize = 10.sp)
+                            Text("حذف حزمة صوت لا يحذف مكتبة التسجيلات أو ملفات WAV وMP3.", color = GoldSoft, fontSize = 10.sp)
                             Text(managerStatus, color = TextMuted, fontSize = 10.sp)
                             TextButton(
                                 onClick = { scope.launch { refreshVoiceStorage(); managerStatus = "تم تحديث معلومات التخزين." } },
@@ -1795,8 +1795,8 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
                             HelpSection("٣. اختيار اللغة", "اختر «العربية» عندما يكون النص عربيًا، واختر English عندما يكون النص إنجليزيًا. الأفضل أن يكون النص بلغة واحدة في كل عملية حتى تكون القراءة أوضح.")
                             HelpSection("٤. اختيار الصوت", "تتضمن المجموعة الأساسية خمسة أنماط رجالية M1–M5 وخمسة نسائية F1–F5 للعربية والإنجليزية. وتعرض مكتبة الأصوات حزمًا إضافية عند توفر مصدر متوافق. Nabra الحالي صوت عربي واحد للفصحى الحديثة، وهو تجريبي حتى تجربته على جهاز فعلي.")
                             HelpSection("٥. السرعة والجودة", "سرعة القراءة مستقلة عن جودة التوليد. ابدأ بسرعة 1.0× ثم اضبطها بين 0.8× و1.2×. اختر سريعًا (4 خطوات) أو متوازنًا (6) أو أعلى جودة (8). إذا كانت RAM المتاحة قليلة، يخفض التطبيق الحد تلقائيًا لتجنب الضغط على الذاكرة.")
-                            HelpSection("٦. إنشاء الصوت والاستماع", "بعد كتابة النص واختيار اللغة والصوت، اضغط «إنشاء الصوت والاستماع». سيُنشئ التطبيق ملف WAV على الهاتف ويبدأ تشغيله تلقائيًا. اضغط زر التشغيل الدائري داخل بطاقة الصوت لسماعه مرة أخرى، أو اضغط سهم التنزيل الموجود بجانبه لحفظ الملف.")
-                            HelpSection("٧. مكتبة التسجيلات", "يحفظ التطبيق التسجيلات الناجحة في مكتبة داخلية خاصة بالجهاز، مع النص واللغة والصوت وتاريخ الإنشاء. يمكنك إعادة تشغيل التسجيل أو استعادة نصه إلى المحرر أو تنزيله بصيغة WAV إلى مجلد SAWT AI أو حذفه. تحتفظ المكتبة بآخر 100 تسجيل.")
+                            HelpSection("٦. إنشاء الصوت والاستماع", "بعد كتابة النص واختيار اللغة والصوت، اضغط «إنشاء الصوت والاستماع». سيُنشئ التطبيق ملفًا صوتيًا على الهاتف ويبدأ تشغيله تلقائيًا. اضغط زر التشغيل الدائري داخل بطاقة الصوت لسماعه مرة أخرى، أو اضغط سهم التنزيل الموجود بجانبه لحفظ الملف.")
+                            HelpSection("٧. مكتبة التسجيلات", "يحفظ التطبيق التسجيلات الناجحة في مكتبة داخلية خاصة بالجهاز، مع النص واللغة والصوت وتاريخ الإنشاء. يمكنك إعادة تشغيل التسجيل أو استعادة نصه إلى المحرر أو تنزيله بصيغته الأصلية إلى مجلد SAWT AI أو حذفه. تحتفظ المكتبة بآخر 100 تسجيل.")
                             HelpSection("٨. العمل دون إنترنت والخصوصية", "الإنترنت مطلوب أول مرة لتنزيل نموذج الصوت (نحو 133 ميجابايت) ونموذج التشكيل (نحو 22 ميجابايت). بعد اكتمال التنزيلين يعمل التشكيل وإنشاء الصوت محليًا دون اتصال. لا يرسل التطبيق النص إلى خدمة سحابية أثناء المعالجة المحلية.")
                             HelpSection("٩. تحديث مكتبة الأصوات", "اضغط «تحديث» في قسم مكتبة الأصوات لجلب الفهرس المنسق من GitHub. لا يُشغّل التطبيق شيفرات تأتي من الفهرس؛ الحزم المتوافقة فقط مع المحرك المثبّت يمكن تنزيلها. الأصوات التي تتطلب شراءً أو ترخيصًا مدفوعًا تُفتح صفحة مصدرها وترخيصها، ولا توجد عمليات دفع داخل التطبيق.")
                         }
@@ -1812,7 +1812,7 @@ private fun SawtStudio(authSession: SawtAuthSession? = null) {
                     onDismissRequest = { pendingHistoryDelete = null },
                     containerColor = SurfaceDark,
                     title = { Text("حذف التسجيل من المكتبة؟", color = Gold) },
-                    text = { Text("سيُحذف ملف WAV المحفوظ لهذا التسجيل فقط. لا يمكن التراجع عن الحذف.", color = TextMain) },
+                    text = { Text("سيُحذف ملف الصوت المحفوظ لهذا التسجيل فقط. لا يمكن التراجع عن الحذف.", color = TextMain) },
                     confirmButton = {
                         TextButton(onClick = {
                             val selected = pendingHistoryDelete ?: return@TextButton
