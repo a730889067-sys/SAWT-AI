@@ -13,11 +13,18 @@ test("rejects empty and oversized text", () => {
   assert.equal(validateSynthesisRequest({ text: "ا".repeat(3001) }).code, "TEXT_TOO_LONG");
 });
 
-test("Gemini requires explicit data-use consent, including auto fallback", () => {
+test("Every cloud provider requires explicit data-use consent", () => {
   assert.equal(validateSynthesisRequest({ text: "مرحبا", provider: "gemini-quality" }).code, "CLOUD_DATA_CONSENT_REQUIRED");
+  assert.equal(validateSynthesisRequest({ text: "مرحبا", provider: "easyvoice-msa" }).code, "CLOUD_DATA_CONSENT_REQUIRED");
   assert.equal(validateSynthesisRequest({ text: "مرحبا", provider: "gemini-quality", cloudDataConsent: true }).ok, true);
   assert.equal(validateSynthesisRequest({ text: "مرحبا", provider: "auto" }, { GEMINI_API_KEY: "configured" }).code, "CLOUD_DATA_CONSENT_REQUIRED");
   assert.equal(validateSynthesisRequest({ text: "مرحبا", provider: "auto", cloudDataConsent: true }, { GEMINI_API_KEY: "configured" }).ok, true);
+  assert.equal(validateSynthesisRequest({ text: "مرحبا", provider: "auto", cloudDataConsent: true }).ok, true);
+});
+
+test("speech speed is constrained to a safe provider range", () => {
+  assert.equal(validateSynthesisRequest({ text: "مرحبا", speed: 3, cloudDataConsent: true }).code, "INVALID_SPEED");
+  assert.equal(validateSynthesisRequest({ text: "مرحبا", speed: 1.25, cloudDataConsent: true }).ok, true);
 });
 
 test("SSML XML escaping prevents markup injection", () => {
