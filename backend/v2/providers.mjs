@@ -81,30 +81,39 @@ async function synthesizeEasyVoice({ text, voice, speed, providerId }, env, fetc
 }
 async function synthesizeGemini({ text, voice, model, providerId, speed }, env, fetchImpl) {
   if (!env.GEMINI_API_KEY) throw new ProviderError(providerId, 503, "GEMINI_NOT_CONFIGURED", true);
+
+  // Gemini 3.8 TTS uses prebuilt voice IDs, plus turn-level speech metadata.
+  // Free-tier keys are sent in a header (never in the URL, where access logs can capture them).
   const voiceName = voice === "male" ? "Puck" : "Kore";
   const url = "https://generativelanguage.googleapis.com/v1beta/models/" +
-    encodeURIComponent(model) + ":generateContent?key=" + encodeURIComponent(env.GEMINI_API_KEY);
+    encodeURIComponent(model) + ":generateContent";
   const payload = {
     contents: [{
       role: "user",
       parts: [{
         text,
         speechMetadata: {
-          style: "Read the exact text in clear, formal Modern Standard Arabic (Al-Fusha). Use careful Arabic articulation, neutral delivery, natural pauses, and do not add or omit words. Target speaking rate: " + String(speed || 1) + "x."
+          style: "Read the exact transcript in clear, formal Modern Standard Arabic (Al-Fusha). Use careful articulation, natural pauses, and a speaking pace of " +
+            String(Math.min(2, Math.max(0.5, Number(speed || 1)))) +
+            " times normal speed. Do not add, omit, or paraphrase words."
         }
       }]
     }],
     generationConfig: {
       responseModalities: ["AUDIO"],
       speechConfig: {
-        voiceConfig: { prebuiltVoiceConfig: { voiceName } },
-        languageCode: "ar"
+        voiceConfig: { prebuiltVoiceConfig: { voiceName } }
       }
     }
   };
+
   const response = await checkedFetch(fetchImpl, url, {
     method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json",
+      "x-goog-api-key": env.GEMINI_API_KEY
+    },
     body: JSON.stringify(payload)
   }, providerId);
   const json = await response.json();
