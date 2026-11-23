@@ -84,7 +84,9 @@ async function synthesizeGemini({ text, voice, model, providerId, speed }, env, 
 
   // Gemini 3.8 TTS uses prebuilt voice IDs, plus turn-level speech metadata.
   // Free-tier keys are sent in a header (never in the URL, where access logs can capture them).
-  const voiceName = voice === "male" ? "Puck" : "Kore";
+  const voiceName = voice === "male"
+    ? (env.GEMINI_VOICE_MALE || "Puck")
+    : (env.GEMINI_VOICE_FEMALE || "Kore");
   const url = "https://generativelanguage.googleapis.com/v1beta/models/" +
     encodeURIComponent(model) + ":generateContent";
   const payload = {
