@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: sawt-ai-api
+    runtime: node
+    plan: free
+    branch: redesign/sawt-ai-v2
+    rootDir: backend/v2
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    healthCheckPath: /v2/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: SAWT_FIREBASE_PROJECT_ID
+        sync: false
+      - key: EASYVOICE_API_KEY
+        sync: false
+      - key: EASYVOICE_FREE_API_CONFIRMED
+        value: "false"
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_FREE_TIER_CONFIRMED
+        value: "false"
+      - key: GEMINI_MODEL_QUALITY
+        value: "gemini-3.8-flash-tts"
+      - key: GEMINI_MODEL_FAST
+        value: "gemini-3.8-flash-lite-tts"
