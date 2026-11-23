@@ -28,3 +28,48 @@ test("EasyVoice rejects missing API keys without making network calls", async ()
   await assert.rejects(() => adapters["easyvoice-msa"]({ text: "مرحبا", voice: "female" }));
   assert.equal(calls, 0);
 });
+
+test("Gemini 3.8 TTS uses the documented audio request and keeps API keys out of URLs", async () => {
+  const captured = [];
+  const wav = Buffer.alloc(640);
+  wav.write("RIFF", 0, "ascii");
+  wav.write("WAVE", 8, "ascii");
+  const fakeFetch = async (url, options) => {
+    captured.push({ url, options, body: JSON.parse(options.body) });
+    return new Response(JSON.stringify({
+      candidates: [{
+        content: {
+          parts: [{ inlineData: { mimeType: "audio/wav", data: wav.toString("base64") } }]
+        }
+      }]
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const adapters = createProviderAdapters({
+    GEMINI_API_KEY: "secret-google-key",
+    GEMINI_FREE_TIER_CONFIRMED: "true",
+    GEMINI_MODEL_QUALITY: "gemini-3.8-flash-tts",
+    GEMINI_MODEL_FAST: "gemini-3.8-flash-lite-tts"
+  }, fakeFetch);
+
+  const result = await adapters["gemini-quality"]({
+    text: "السَّلَامُ عَلَيْكُمْ",
+    voice: "female",
+    speed: 1.15
+  });
+
+  assert.equal(captured.length, 1);
+  assert.equal(captured[0].url,
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash-tts:generateContent");
+  assert.equal(captured[0].url.includes("secret-google-key"), false);
+  assert.equal(captured[0].options.headers["x-goog-api-key"], "secret-google-key");
+  assert.deepEqual(captured[0].body.generationConfig.responseModalities, ["AUDIO"]);
+  assert.equal(
+    captured[0].body.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName,
+    "Kore"
+  );
+  assert.match(captured[0].body.contents[0].parts[0].speechMetadata.style, /Modern Standard Arabic/);
+  assert.match(captured[0].body.contents[0].parts[0].speechMetadata.style, /1.15/);
+  assert.equal(result.contentType, "audio/wav");
+  assert.equal(result.extension, "wav");
+  assert.equal(result.audio.length, 640);
+});
