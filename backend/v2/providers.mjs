@@ -79,37 +79,58 @@ async function synthesizeEasyVoice({ text, voice, speed, providerId }, env, fetc
     return { audio, contentType: "audio/mpeg", extension: "mp3" };
   });
 }
+
+function extractGeminiAudioData(responseJson) {
+  const outputSteps = Array.isArray(responseJson?.steps) ? responseJson.steps : [];
+  for (let stepIndex = outputSteps.length - 1; stepIndex >= 0; stepIndex -= 1) {
+    const step = outputSteps[stepIndex];
+    if (step?.type !== "model_output" || !Array.isArray(step.content)) continue;
+    for (let contentIndex = step.content.length - 1; contentIndex >= 0; contentIndex -= 1) {
+      const item = step.content[contentIndex];
+      if (item?.type === "audio" && typeof item.data === "string" && item.data.length > 0) {
+        return item.data;
+      }
+    }
+  }
+  // Keep compatibility with SDK-shaped responses if the upstream response is proxied.
+  return typeof responseJson?.output_audio?.data === "string"
+    ? responseJson.output_audio.data
+    : null;
+}
+
 async function synthesizeGemini({ text, voice, model, providerId, speed }, env, fetchImpl) {
   if (!env.GEMINI_API_KEY) throw new ProviderError(providerId, 503, "GEMINI_NOT_CONFIGURED", true);
 
-  // Gemini 3.8 TTS uses prebuilt voice IDs, plus turn-level speech metadata.
-  // Free-tier keys are sent in a header (never in the URL, where access logs can capture them).
   const voiceName = voice === "male"
     ? (env.GEMINI_VOICE_MALE || "Puck")
     : (env.GEMINI_VOICE_FEMALE || "Kore");
-  const url = "https://generativelanguage.googleapis.com/v1beta/models/" +
-    encodeURIComponent(model) + ":generateContent";
+  const pace = Math.min(2, Math.max(0.5, Number(speed || 1)));
+  const style = "Read the exact transcript in clear, formal Modern Standard Arabic (Al-Fusha). " +
+    "Use careful articulation and natural pauses. Speak at " + pace +
+    " times normal speed. Do not add, omit, or paraphrase words.";
+
+  // Gemini 3.8 TTS uses the Interactions API, not generateContent.
+  // Keep the API key in the header; never place it in the request URL.
   const payload = {
-    contents: [{
-      role: "user",
-      parts: [{
+    model,
+    input: [{
+      type: "user_input",
+      content: [{
+        type: "text",
         text,
-        speechMetadata: {
-          style: "Read the exact transcript in clear, formal Modern Standard Arabic (Al-Fusha). Use careful articulation, natural pauses, and a speaking pace of " +
-            String(Math.min(2, Math.max(0.5, Number(speed || 1)))) +
-            " times normal speed. Do not add, omit, or paraphrase words."
-        }
+        annotations: [{
+          type: "speech_metadata",
+          style
+        }]
       }]
     }],
-    generationConfig: {
-      responseModalities: ["AUDIO"],
-      speechConfig: {
-        voiceConfig: { prebuiltVoiceConfig: { voiceName } }
-      }
+    response_format: { type: "audio" },
+    generation_config: {
+      speech_config: [{ voice: voiceName }]
     }
   };
 
-  const response = await checkedFetch(fetchImpl, url, {
+  const response = await checkedFetch(fetchImpl, "https://generativelanguage.googleapis.com/v1beta/interactions", {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -118,13 +139,20 @@ async function synthesizeGemini({ text, voice, model, providerId, speed }, env, 
     },
     body: JSON.stringify(payload)
   }, providerId);
-  const json = await response.json();
-  const parts = json.candidates?.[0]?.content?.parts || [];
-  const audioPart = parts.find(part => part.inlineData?.data);
-  if (!audioPart) throw new ProviderError(providerId, 502, "GEMINI_AUDIO_MISSING", true);
-  const audio = Buffer.from(audioPart.inlineData.data, "base64");
-  if (audio.length < 512 || audio.toString("ascii", 0, 4) !== "RIFF") {
-    throw new ProviderError(providerId, 502, "GEMINI_AUDIO_INVALID", true);
+
+  let json;
+  try { json = await response.json(); }
+  catch { throw new ProviderError(providerId, 502, "GEMINI_RESPONSE_INVALID_JSON", true); }
+
+  const encodedAudio = extractGeminiAudioData(json);
+  if (!encodedAudio) throw new ProviderError(providerId, 502, "GEMINI_AUDIO_MISSING", true);
+
+  let audio;
+  try { audio = Buffer.from(encodedAudio, "base64"); }
+  catch { throw new ProviderError(providerId, 502, "GEMINI_AUDIO_INVALID_BASE64", true); }
+
+  if (audio.length < 512 || audio.toString("ascii", 0, 4) !== "RIFF" || audio.toString("ascii", 8, 12) !== "WAVE") {
+    throw new ProviderError(providerId, 502, "GEMINI_AUDIO_INVALID_WAV", true);
   }
   return { audio, contentType: "audio/wav", extension: "wav" };
 }
