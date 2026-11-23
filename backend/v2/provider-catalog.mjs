@@ -25,7 +25,7 @@ export function getProviderCatalog(env = process.env) {
       class: "cloud",
       status: easyVoiceConfigured ? "available" : "needs_setup",
       freeTier: true,
-      freeTierNote: "5,000 حرف يوميًا على المفتاح المجاني، مشتركة مع موقع EasyVoice؛ صوتان فصحى ar_m1 وar_f1. الحقوق التجارية متاحة على كل الخطط، والعربية beta وتحتاج اختبارًا سمعيًا.",
+      freeTierNote: "5,000 حرف يوميًا على المفتاح المجاني، مشتركة مع موقع EasyVoice؛ ar_m1 وar_f1 ضمن الأصوات المجانية. العربية beta وتحتاج اختبارًا سمعيًا، ويجب مراجعة شروط الاستخدام قبل التوزيع التجاري.",
       dataConsentRequired: true,
       priority: 10,
       contentType: "audio/mpeg"
