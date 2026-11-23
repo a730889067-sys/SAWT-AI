@@ -20,8 +20,8 @@ export function getProviderCatalog(env = process.env) {
     {
       id: "easyvoice-msa",
       company: "EasyVoice",
-      name: "Arabic MSA · Supertonic-3",
-      model: "Supertonic-3 Arabic (ar_m1 / ar_f1)",
+      name: "Arabic MSA · Kokoro-82M",
+      model: "Kokoro-82M (ar_m1 / ar_f1)",
       class: "cloud",
       status: easyVoiceConfigured ? "available" : "needs_setup",
       freeTier: true,
