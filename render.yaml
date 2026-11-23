@@ -26,3 +26,7 @@ services:
         value: "gemini-3.8-flash-tts"
       - key: GEMINI_MODEL_FAST
         value: "gemini-3.8-flash-lite-tts"
+      - key: GEMINI_VOICE_MALE
+        value: "Puck"
+      - key: GEMINI_VOICE_FEMALE
+        value: "Kore"
