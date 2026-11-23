@@ -73,3 +73,22 @@ test("Gemini 3.8 TTS uses the documented audio request and keeps API keys out of
   assert.equal(result.extension, "wav");
   assert.equal(result.audio.length, 640);
 });
+
+test("Gemini prebuilt voice profiles can be changed with server environment variables", async () => {
+  let requestedVoice = "";
+  const wav = Buffer.alloc(640);
+  wav.write("RIFF", 0, "ascii");
+  const fakeFetch = async (_url, options) => {
+    const body = JSON.parse(options.body);
+    requestedVoice = body.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName;
+    return new Response(JSON.stringify({
+      candidates: [{ content: { parts: [{ inlineData: { data: wav.toString("base64") } }] } }]
+    }), { status: 200 });
+  };
+  const adapters = createProviderAdapters({
+    GEMINI_API_KEY: "key",
+    GEMINI_VOICE_FEMALE: "Iapetus"
+  }, fakeFetch);
+  await adapters["gemini-quality"]({ text: "مرحبًا", voice: "female" });
+  assert.equal(requestedVoice, "Iapetus");
+});
